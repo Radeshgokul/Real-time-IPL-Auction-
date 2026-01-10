@@ -90,6 +90,64 @@ const runTimer = (roomId, io) => {
     activeTimers[roomId] = interval;
 };
 
+const resolveAuctionRound = async (roomId, io) => {
+    try {
+        const auction = await Auction.findOne({ roomId }).populate('currentPlayer');
+        if (!auction) return;
+
+        if (auction.currentBidder) {
+            // SOLD
+            const player = await Player.findById(auction.currentPlayer);
+            player.status = 'sold';
+            player.soldTo = auction.currentBidder;
+            player.soldPrice = auction.currentBid;
+            await player.save();
+
+            const team = await Team.findById(auction.currentBidder);
+            team.budget -= auction.currentBid;
+            team.squad.push(player._id);
+            await team.save();
+
+            const populatedTeam = await Team.findById(team._id).populate('squad');
+
+            io.to(roomId).emit('auction:sold', { player, team: populatedTeam, price: auction.currentBid });
+        } else {
+            // UNSOLD
+            const player = await Player.findById(auction.currentPlayer);
+            player.status = 'unsold';
+            await player.save();
+
+            auction.unsoldPlayers.push(player._id);
+            io.to(roomId).emit('auction:unsold', { player });
+        }
+
+        await auction.save();
+
+        setTimeout(() => startAuction(roomId, io), 3000);
+    } catch (err) {
+        console.error('Resolve Round Error:', err);
+    }
+};
+
+const endAuctionManually = async (roomId, io) => {
+    try {
+        const auction = await Auction.findOne({ roomId });
+        const room = await Room.findOne({ roomId });
+        const teams = await Team.find({ roomId }).populate('squad');
+
+        if (!auction || !room) return;
+
+        auction.status = 'completed';
+        await auction.save();
+
+        io.to(roomId).emit('auction:end', { message: 'Auction finished!', teams, auction });
+        io.to(roomId).emit('room:sync', { room, teams, auction });
+        console.log(`[DEBUG] Auction manually ended for Room ${roomId}`);
+    } catch (err) {
+        console.error('[DEBUG] Manual End Error:', err);
+    }
+};
+
 const resumeAuctionTimer = (roomId, io) => {
     runTimer(roomId, io);
 };
