@@ -1,97 +1,15 @@
 require('dotenv').config();
-require('dotenv').config();
 const mongoose = require('mongoose');
 const Player = require('./models/Player');
-{ name: "Venkatesh Iyer", role: "All-Rounder", price: 20000000 },
-{ name: "Jake Fraser-McGurk", role: "Batter", price: 20000000 },
-{ name: "Aiden Markram", role: "Batter", price: 20000000 },
-{ name: "Harshal Patel", role: "Bowler", price: 20000000 },
-{ name: "Ravichandran Ashwin", role: "All-Rounder", price: 20000000 },
-{ name: "Bhuvneshwar Kumar", role: "Bowler", price: 20000000 },
-{ name: "Shardul Thakur", role: "All-Rounder", price: 20000000 },
-{ name: "Krunal Pandya", role: "All-Rounder", price: 20000000 },
-{ name: "Washington Sundar", role: "All-Rounder", price: 20000000 },
-{ name: "Axar Patel", role: "All-Rounder", price: 20000000 },
-{ name: "Kuldeep Yadav", role: "Bowler", price: 20000000 },
-{ name: "Pat Cummins", role: "Bowler", price: 20000000 },
-{ name: "Travis Head", role: "Batter", price: 20000000 },
-{ name: "Heinrich Klaasen", role: "WK-Batter", price: 20000000 },
-{ name: "Anrich Nortje", role: "Bowler", price: 20000000 },
-{ name: "Wanindu Hasaranga", role: "All-Rounder", price: 20000000 },
-{ name: "Maheesh Theekshana", role: "Bowler", price: 20000000 },
-{ name: "Adam Zampa", role: "Bowler", price: 20000000 },
-{ name: "Jofra Archer", role: "Bowler", price: 20000000 },
-{ name: "Josh Hazlewood", role: "Bowler", price: 20000000 },
-{ name: "T. Natarajan", role: "Bowler", price: 20000000 },
-{ name: "Khaleel Ahmed", role: "Bowler", price: 20000000 },
-{ name: "Avesh Khan", role: "Bowler", price: 20000000 },
-{ name: "Prasidh Krishna", role: "Bowler", price: 20000000 },
-{ name: "Noor Ahmad", role: "Bowler", price: 20000000 },
-{ name: "Will Jacks", role: "All-Rounder", price: 20000000 },
-{ name: "Tim David", role: "Batter", price: 20000000 },
-{ name: "Spencer Johnson", role: "Bowler", price: 20000000 },
-{ name: "Mustafizur Rahman", role: "Bowler", price: 20000000 },
-{ name: "Naveen-ul-Haq", role: "Bowler", price: 20000000 },
-{ name: "Umesh Yadav", role: "Bowler", price: 20000000 },
-{ name: "Tabraiz Shamsi", role: "Bowler", price: 20000000 },
-{ name: "Steve Smith", role: "Batter", price: 20000000 },
-{ name: "Jason Holder", role: "All-Rounder", price: 20000000 },
-{ name: "Chris Jordan", role: "Bowler", price: 20000000 },
-{ name: "Jonny Bairstow", role: "WK-Batter", price: 20000000 },
-{ name: "Rahmanullah Gurbaz", role: "WK-Batter", price: 20000000 },
-{ name: "Moeen Ali", role: "All-Rounder", price: 20000000 },
-{ name: "Daryl Mitchell", role: "All-Rounder", price: 20000000 },
-{ name: "Glenn Phillips", role: "Batter", price: 20000000 },
-{ name: "Gus Atkinson", role: "Bowler", price: 20000000 },
-{ name: "Rilee Rossouw", role: "Batter", price: 20000000 },
-{ name: "Tom Banton", role: "WK-Batter", price: 20000000 },
-{ name: "Fazalhaq Farooqi", role: "Bowler", price: 20000000 },
-{ name: "Gerald Coetzee", role: "Bowler", price: 20000000 },
-{ name: "David Willey", role: "All-Rounder", price: 20000000 },
-{ name: "Lockie Ferguson", role: "Bowler", price: 20000000 },
-
-// 1.50 Cr Players
-{ name: "David Miller", role: "Batter", price: 15000000 },
-{ name: "Rachin Ravindra", role: "All-Rounder", price: 15000000 },
-{ name: "Rovman Powell", role: "Batter", price: 15000000 },
-{ name: "Ajinkya Rahane", role: "Batter", price: 15000000 },
-{ name: "Nitish Rana", role: "All-Rounder", price: 15000000 },
-{ name: "Azmatullah Omarzai", role: "All-Rounder", price: 15000000 },
-{ name: "Sherfane Rutherford", role: "Batter", price: 15000000 },
-{ name: "Mohammad Nabi", role: "All-Rounder", price: 15000000 },
-
-// 1.25 Cr Players
-{ name: "Marco Jansen", role: "All-Rounder", price: 12500000 },
-{ name: "Nathan Ellis", role: "Bowler", price: 12500000 },
-{ name: "James Anderson", role: "Bowler", price: 12500000 },
-
-// 1.00 Cr Players
-{ name: "Jitesh Sharma", role: "WK-Batter", price: 10000000 },
-{ name: "Rahul Chahar", role: "Bowler", price: 10000000 },
-{ name: "Mayank Agarwal", role: "Batter", price: 10000000 },
-{ name: "Akash Deep", role: "Bowler", price: 10000000 },
-{ name: "Tushar Deshpande", role: "Bowler", price: 10000000 },
-{ name: "Shahbaz Ahmed", role: "All-Rounder", price: 10000000 },
-{ name: "Jaydev Unadkat", role: "Bowler", price: 10000000 },
-{ name: "Alex Carey", role: "WK-Batter", price: 10000000 },
-{ name: "Ryan Rickelton", role: "WK-Batter", price: 10000000 },
-
-// 75 L Players
-{ name: "Prithvi Shaw", role: "Batter", price: 7500000 },
-{ name: "Rahul Tripathi", role: "Batter", price: 7500000 },
-{ name: "Manish Pandey", role: "Batter", price: 7500000 },
-{ name: "Deepak Hooda", role: "All-Rounder", price: 7500000 },
-{ name: "Sarfaraz Khan", role: "Batter", price: 7500000 },
-{ name: "R. Sai Kishore", role: "Bowler", price: 7500000 },
 const Auction = require('./models/Auction');
 const Team = require('./models/Team');
 const Room = require('./models/Room');
 
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ipl-auction', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-}).then(() => console.log('Connected to MongoDB'))
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ipl-auction')
+    .then(() => console.log('Connected to MongoDB'))
     .catch(err => console.error('MongoDB connection error:', err));
+
+const { randomUUID } = require('crypto');
 
 const seedPlayers = async () => {
     try {
@@ -105,6 +23,7 @@ const seedPlayers = async () => {
         const add = (name, role, price) => {
             if (name && role && price) {
                 players.push({
+                    playerId: randomUUID(),
                     name: name.trim(),
                     role: role.trim(),
                     basePrice: price,
