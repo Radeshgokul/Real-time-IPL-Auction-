@@ -16,6 +16,7 @@ function App() {
     const [auction, setAuction] = useState(null);
     const [match, setMatch] = useState(null);
     const [pointsTable, setPointsTable] = useState([]);
+    const [playingXIs, setPlayingXIs] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -37,7 +38,10 @@ function App() {
             setPointsTable(data.pointsTable || []);
         };
 
-        const handleMatchStart = (data) => setMatch(data.match);
+        const handleMatchStart = (data) => {
+            setMatch(data.match);
+            if (data.xis) setPlayingXIs(data.xis);
+        };
         const handlePointsUpdate = (data) => setPointsTable(data.pointsTable);
         const handleAuctionState = (data) => setAuction(data.auction);
 
@@ -224,7 +228,7 @@ function App() {
         return <PlayingXISelection roomId={room.roomId} userId={user.id} squad={myTeam?.squad || []} />;
     }
 
-    if (room.status === 'match') return <MatchCenter roomId={room.roomId} userId={user.id} teams={teams} matchData={match} />;
+    if (room.status === 'match') return <MatchCenter roomId={room.roomId} userId={user.id} teams={teams} matchData={match} playingXIs={playingXIs} />;
 
     if (room.status === 'league_over') {
         return (

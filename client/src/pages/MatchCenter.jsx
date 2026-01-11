@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import socket from '../utils/socket';
 import { motion } from 'framer-motion';
 
-const MatchCenter = ({ roomId, userId, teams, matchData }) => {
+const MatchCenter = ({ roomId, userId, teams, matchData, playingXIs }) => {
     const [match, setMatch] = useState(matchData);
-    const [tossResult, setTossResult] = useState(null);
+    const [tossResult, setTossResult] = useState(matchData?.tossWinner || null);
     const [innings, setInnings] = useState(null);
     const [ballResult, setBallResult] = useState(null);
     const [myPick, setMyPick] = useState(null);
+    const [viewedLineups, setViewedLineups] = useState(false);
 
     useEffect(() => {
         socket.on('match:tossResult', (data) => setTossResult(data.winner));
@@ -29,6 +30,44 @@ const MatchCenter = ({ roomId, userId, teams, matchData }) => {
         setMyPick(num);
         socket.emit('match:pick', { roomId, userId, value: num });
     };
+
+    const shouldShowLineups = playingXIs?.length > 0 && !viewedLineups && !matchData?.tossWinner && !tossResult;
+
+    if (shouldShowLineups) {
+        return (
+            <div className="min-h-screen bg-ipl-dark text-white p-8 overflow-y-auto">
+                <h2 className="text-4xl text-center font-black text-ipl-gold mb-8 italic uppercase tracking-tighter">Playing XIs Confirmed</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-6xl mx-auto">
+                    {playingXIs.map((xi, idx) => {
+                        const team = teams.find(t => t._id === xi.teamId || t._id === xi.teamId?._id);
+                        return (
+                            <div key={idx} className="bg-slate-900/80 p-6 rounded-3xl border border-slate-700">
+                                <h3 className="text-2xl font-bold bg-slate-800 p-4 rounded-xl text-center mb-6 border-b-4 border-ipl-blue">
+                                    {team?.name || 'Team'}
+                                </h3>
+                                <div className="space-y-2">
+                                    {xi.players.map(p => (
+                                        <div key={p._id} className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
+                                            <span className="font-bold">{p.name || 'Unknown Player'}</span>
+                                            <span className="text-xs text-slate-400 uppercase">{p.role || 'Player'}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+                <div className="text-center mt-12 pb-12">
+                    <button
+                        onClick={() => setViewedLineups(true)}
+                        className="bg-ipl-gold text-black font-black py-4 px-12 rounded-full text-xl hover:bg-yellow-400 transition-all shadow-glow-gold uppercase tracking-widest"
+                    >
+                        Proceed to Toss
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     if (!tossResult) {
         return (

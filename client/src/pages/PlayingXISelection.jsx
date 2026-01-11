@@ -15,8 +15,8 @@ const PlayingXISelection = ({ roomId, userId, squad, onMatchStart }) => {
 
     const validateXI = () => {
         if (selected.length !== 11) return 'Select exactly 11 players';
-        const wk = selected.filter(p => p.role === 'Wicketkeeper').length;
-        const ar = selected.filter(p => p.role === 'All-rounder').length;
+        const wk = selected.filter(p => p.role === 'Wicketkeeper' || p.role === 'WK-Batter').length;
+        const ar = selected.filter(p => p.role === 'All-rounder' || p.role === 'All-Rounder').length;
         const bowl = selected.filter(p => p.role === 'Bowler').length;
 
         if (wk < 1) return 'Need at least 1 Wicketkeeper';

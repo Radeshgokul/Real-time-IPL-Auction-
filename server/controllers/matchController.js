@@ -25,7 +25,7 @@ const submitXI = async (roomId, userId, xiIds, io) => {
     const playingXI = new PlayingXI({ matchId: match._id, teamId: team._id, userId: userId, players: xiIds, isLocked: true });
     await playingXI.save();
 
-    const allXIs = await PlayingXI.find({ matchId: match._id });
+    const allXIs = await PlayingXI.find({ matchId: match._id }).populate('players');
     if (allXIs.length === 2) {
         match.status = 'live';
         await match.save();
