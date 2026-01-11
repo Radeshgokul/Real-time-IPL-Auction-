@@ -14,6 +14,27 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
     // const bidSound = new Audio('/sounds/bid.mp3');
     // const soldSound = new Audio('/sounds/sold.mp3');
 
+    // Refs to constant state for socket listeners
+    const auctionTeamsRef = useRef(teams);
+    const userIdRef = useRef(userId);
+
+    useEffect(() => {
+        auctionTeamsRef.current = auctionTeams;
+    }, [auctionTeams]);
+
+    useEffect(() => {
+        userIdRef.current = userId;
+    }, [userId]);
+
+    // Derived state for local use
+    useEffect(() => {
+        const foundTeam = auctionTeams.find(t => {
+            const tUserId = t.userId?._id || t.userId;
+            return tUserId === userId;
+        });
+        setMyTeam(foundTeam);
+    }, [auctionTeams, userId]);
+
     useEffect(() => {
         if (auctionData) {
             setAuction(auctionData);
@@ -21,52 +42,46 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
     }, [auctionData]);
 
     useEffect(() => {
-        const foundTeam = auctionTeams.find(t => {
-            const tUserId = t.userId?._id || t.userId;
-            return tUserId === userId;
-        });
-        setMyTeam(foundTeam);
-
-        socket.on('auction:newPlayer', (data) => {
+        // Handlers
+        const handleNewPlayer = (data) => {
             setAuction(data.auction);
             setOverlay(null);
             addNotification(`Next Player: ${data.player.name}`);
-        });
+        };
 
-        socket.on('auction:start', (data) => {
+        const handleAuctionStart = (data) => {
             setAuction(data.auction);
             setOverlay(null);
             addNotification(`Auction Started! First Player: ${data.firstPlayer.name}`);
-        });
+        };
 
-        socket.on('auction:update', (data) => setAuction(data.auction));
+        const handleAuctionUpdate = (data) => setAuction(data.auction);
 
-        socket.on('auction:timer', (data) => {
+        const handleTimer = (data) => {
             setAuction(prev => ({ ...prev, timer: data.timer }));
-        });
+        };
 
-        socket.on('auction:bidUpdate', (data) => {
+        const handleBidUpdate = (data) => {
             addNotification(`${data.teamName} bid ₹${(data.amount / 10000000).toFixed(2)} Cr`);
-            // bidSound.play().catch(e => {});
-        });
+        };
 
-        socket.on('auction:sold', (data) => {
-            // soldSound.play().catch(e => {});
+        const handleSold = (data) => {
             setOverlay({ type: 'sold', player: data.player, team: data.team, price: data.price });
             addNotification(`SOLD! ${data.player.name} to ${data.team.name} for ₹${(data.price / 10000000).toFixed(2)} Cr`);
-            setAuctionTeams(prev => prev.map(t => t._id === data.team._id ? data.team : t));
-        });
 
-        socket.on('auction:unsold', (data) => {
+            // Safe state update
+            setAuctionTeams(prev => prev.map(t => t._id === data.team._id ? data.team : t));
+        };
+
+        const handleUnsold = (data) => {
             setOverlay({ type: 'unsold', player: data.player });
             addNotification(`UNSOLD: ${data.player.name}`);
-        });
+        };
 
-        socket.on('auction:end', (data) => {
+        const handleEnd = (data) => {
             console.log('[DEBUG] Auction Ended Event Received:', data);
             if (data.teams) setAuctionTeams(data.teams);
 
-            // Force status update regardless of payload to ensure UI switches
             setAuction(prev => ({
                 ...prev,
                 ...(data.auction || {}),
@@ -75,25 +90,37 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
 
             setOverlay(null);
             addNotification("Auction Ended! View final squads below.");
-        });
+        };
 
-        socket.on('room:sync', (data) => {
+        const handleRoomSync = (data) => {
             if (data.auction) setAuction(data.auction);
             if (data.teams) setAuctionTeams(data.teams);
-        });
-
-        return () => {
-            socket.off('auction:newPlayer');
-            socket.off('auction:start');
-            socket.off('auction:update');
-            socket.off('auction:timer');
-            socket.off('auction:bidUpdate');
-            socket.off('auction:sold');
-            socket.off('auction:unsold');
-            socket.off('auction:end');
-            socket.off('room:sync');
         };
-    }, [auctionTeams, userId]);
+
+        // Attach Listeners
+        socket.on('auction:newPlayer', handleNewPlayer);
+        socket.on('auction:start', handleAuctionStart);
+        socket.on('auction:update', handleAuctionUpdate);
+        socket.on('auction:timer', handleTimer);
+        socket.on('auction:bidUpdate', handleBidUpdate);
+        socket.on('auction:sold', handleSold);
+        socket.on('auction:unsold', handleUnsold);
+        socket.on('auction:end', handleEnd);
+        socket.on('room:sync', handleRoomSync);
+
+        // Cleanup: ONE TIME ONLY
+        return () => {
+            socket.off('auction:newPlayer', handleNewPlayer);
+            socket.off('auction:start', handleAuctionStart);
+            socket.off('auction:update', handleAuctionUpdate);
+            socket.off('auction:timer', handleTimer);
+            socket.off('auction:bidUpdate', handleBidUpdate);
+            socket.off('auction:sold', handleSold);
+            socket.off('auction:unsold', handleUnsold);
+            socket.off('auction:end', handleEnd);
+            socket.off('room:sync', handleRoomSync);
+        };
+    }, []); // Empty dependency array ensures this runs ONCE
 
     const addNotification = (msg) => {
         const id = Date.now();

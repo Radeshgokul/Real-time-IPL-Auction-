@@ -29,26 +29,34 @@ function App() {
         };
         checkAuth();
 
-        socket.on('room:sync', (data) => {
+        const handleRoomSync = (data) => {
             setRoom(data.room);
             setTeams(data.teams);
             setAuction(data.auction);
             setMatch(data.match);
             setPointsTable(data.pointsTable || []);
-        });
+        };
 
-        socket.on('match:start', (data) => setMatch(data.match));
-        socket.on('points:update', (data) => setPointsTable(data.pointsTable));
+        const handleMatchStart = (data) => setMatch(data.match);
+        const handlePointsUpdate = (data) => setPointsTable(data.pointsTable);
+        const handleAuctionState = (data) => setAuction(data.auction);
+
+        socket.on('room:sync', handleRoomSync);
+        socket.on('match:start', handleMatchStart);
+        socket.on('points:update', handlePointsUpdate);
 
         // Global Auction Listeners to prevent race conditions
-        socket.on('auction:start', (data) => setAuction(data.auction));
-        socket.on('auction:newPlayer', (data) => setAuction(data.auction));
-        socket.on('auction:update', (data) => setAuction(data.auction));
+        socket.on('auction:start', handleAuctionState);
+        socket.on('auction:newPlayer', handleAuctionState);
+        socket.on('auction:update', handleAuctionState);
 
         return () => {
-            socket.off('room:sync');
-            socket.off('match:start');
-            socket.off('points:update');
+            socket.off('room:sync', handleRoomSync);
+            socket.off('match:start', handleMatchStart);
+            socket.off('points:update', handlePointsUpdate);
+            socket.off('auction:start', handleAuctionState);
+            socket.off('auction:newPlayer', handleAuctionState);
+            socket.off('auction:update', handleAuctionState);
         };
     }, []);
 
