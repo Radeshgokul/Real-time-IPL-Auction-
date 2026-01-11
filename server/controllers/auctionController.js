@@ -198,8 +198,51 @@ const endAuctionManually = async (roomId, io) => {
     }
 };
 
+const resetAuction = async (roomId, io) => {
+    try {
+        console.log(`[DEBUG] Resetting auction for Room ${roomId}`);
+
+        // 1. Reset Global Players (Assuming single tenant for now or shared pool)
+        await Player.updateMany({}, {
+            status: 'available',
+            soldTo: null,
+            soldPrice: null
+        });
+
+        // 2. Reset Teams in this Room
+        await Team.updateMany({ roomId }, {
+            budget: 1300000000,
+            squad: []
+        });
+
+        // 3. Delete Auction State
+        await Auction.deleteOne({ roomId });
+
+        // 4. Reset Room Status
+        const room = await Room.findOneAndUpdate(
+            { roomId },
+            { status: 'waiting' },
+            { new: true }
+        ).populate('users', 'username isGuest');
+
+        // 5. Clear any active timers
+        if (activeTimers[roomId]) {
+            clearInterval(activeTimers[roomId]);
+            delete activeTimers[roomId];
+        }
+
+        // 6. Sync Clients back to Lobby
+        const teams = await Team.find({ roomId }).populate('userId', 'username');
+        io.to(roomId).emit('room:sync', { room, teams, auction: null });
+
+        console.log(`[DEBUG] Room ${roomId} reset to waiting.`);
+    } catch (err) {
+        console.error('[DEBUG] Reset Error:', err);
+    }
+};
+
 const resumeAuctionTimer = (roomId, io) => {
     runTimer(roomId, io);
 };
 
-module.exports = { startAuction, endAuctionManually, resumeAuctionTimer, handleSkipVote };
+module.exports = { startAuction, endAuctionManually, resumeAuctionTimer, handleSkipVote, resetAuction };

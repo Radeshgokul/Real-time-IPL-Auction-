@@ -181,6 +181,23 @@ module.exports = (io) => {
             }
         });
 
+        socket.on('room:reset', async ({ roomId, userId }) => {
+            try {
+                const room = await Room.findOne({ roomId });
+                if (!room) return socket.emit('error', 'Room not found');
+
+                const hostId = room.host._id || room.host;
+                if (hostId.toString() !== userId.toString()) {
+                    return socket.emit('error', 'Only host can reset auction');
+                }
+
+                const { resetAuction } = require('../controllers/auctionController');
+                await resetAuction(roomId, io);
+            } catch (err) {
+                socket.emit('error', err.message);
+            }
+        });
+
         socket.on('match:toss', async ({ roomId, userId, choice }) => {
             try {
                 const { handleToss } = require('../controllers/matchController');

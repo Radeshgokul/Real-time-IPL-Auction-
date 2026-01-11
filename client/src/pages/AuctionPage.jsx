@@ -207,12 +207,22 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
                     </div>
 
                     {isHost && (
-                        <div className="flex justify-center">
+                        <div className="flex justify-center gap-4">
                             <button
                                 onClick={handleProceedToSelection}
                                 className="bg-ipl-gold text-black font-black py-4 px-12 rounded-2xl text-xl uppercase tracking-widest hover:bg-yellow-400 transition-all shadow-glow-gold active:scale-95 z-50 pointer-events-auto"
                             >
                                 PROCEED TO PLAYER SELECTION
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (confirm('DANGER: This will reset the entire season, clear all squads, and return everyone to lobby. Are you sure?')) {
+                                        socket.emit('room:reset', { roomId, userId });
+                                    }
+                                }}
+                                className="bg-red-600 text-white font-black py-4 px-12 rounded-2xl text-xl uppercase tracking-widest hover:bg-red-700 transition-all shadow-lg active:scale-95 z-50 pointer-events-auto"
+                            >
+                                RESET SEASON
                             </button>
                         </div>
                     )}
