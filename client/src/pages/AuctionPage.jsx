@@ -145,6 +145,10 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
         socket.emit('auction:proceedToPlayingXI', { roomId, userId });
     };
 
+    const handleSkip = () => {
+        socket.emit('auction:skip', { roomId, userId });
+    };
+
     if (!auction?.currentPlayer && !overlay && auction?.status !== 'completed') {
         return (
             <div className="flex flex-col items-center justify-center min-h-screen bg-ipl-dark text-white p-6">
@@ -316,8 +320,8 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
                         <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6 flex flex-col items-center justify-center gap-4 shadow-xl">
                             <button
                                 onClick={handleBid}
-                                disabled={isLeading || (myTeam?.budget || 0) < ((auction?.currentBid || 0) + (auction?.currentBid < 20000000 ? 2000000 : 5000000))}
-                                className={`w-full py-5 rounded-2xl text-2xl font-black uppercase tracking-tighter transition-all relative overflow-hidden group shadow-lg ${isLeading ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' :
+                                disabled={isLeading || (myTeam?.budget || 0) < ((auction?.currentBid || 0) + (auction?.currentBid < 20000000 ? 2000000 : 5000000)) || auction?.skipVotes?.includes(userId)}
+                                className={`w-full py-5 rounded-2xl text-2xl font-black uppercase tracking-tighter transition-all relative overflow-hidden group shadow-lg ${isLeading || auction?.skipVotes?.includes(userId) ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' :
                                     'bg-green-500 text-slate-900 hover:bg-green-400 active:scale-[0.98]'
                                     }`}
                             >
@@ -332,6 +336,26 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
                                     )}
                                 </span>
                             </button>
+
+                            {/* SKIP BUTTON */}
+                            <div className="flex items-center gap-4 w-full">
+                                <button
+                                    onClick={handleSkip}
+                                    disabled={auction?.skipVotes?.includes(userIdRef.current)}
+                                    className={`flex-1 py-3 rounded-xl font-bold uppercase tracking-widest transition-all text-xs border ${auction?.skipVotes?.includes(userIdRef.current)
+                                        ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+                                        : 'bg-transparent text-slate-400 border-slate-600 hover:bg-white/10 hover:text-white'
+                                        }`}
+                                >
+                                    {auction?.skipVotes?.includes(userIdRef.current) ? 'VOTE RECORDED' : 'VOTE TO SKIP'}
+                                </button>
+                                {auction?.skipVotes?.length > 0 && (
+                                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider bg-slate-800 px-3 py-2 rounded-lg border border-slate-700">
+                                        {auction.skipVotes.length} / {auctionTeams.length} VOTES
+                                    </div>
+                                )}
+                            </div>
+
                             <p className="text-[9px] text-slate-500 font-bold uppercase tracking-[0.3em] flex items-center gap-2">
                                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
                                 Live Bidding Enabled

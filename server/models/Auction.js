@@ -9,7 +9,8 @@ const AuctionSchema = new mongoose.Schema({
     currentBidder: { type: mongoose.Schema.Types.ObjectId, ref: 'Team' },
     timer: { type: Number, default: 90 },
     auctionQueue: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }],
-    unsoldPlayers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }]
+    unsoldPlayers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }],
+    skipVotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('Auction', AuctionSchema);

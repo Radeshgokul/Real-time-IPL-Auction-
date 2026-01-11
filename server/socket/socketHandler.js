@@ -164,6 +164,15 @@ module.exports = (io) => {
             }
         });
 
+        socket.on('auction:skip', async ({ roomId, userId }) => {
+            try {
+                const { handleSkipVote } = require('../controllers/auctionController');
+                await handleSkipVote(roomId, userId, io);
+            } catch (err) {
+                socket.emit('error', err.message);
+            }
+        });
+
         socket.on('xi:submit', async ({ roomId, userId, xi }) => {
             try {
                 await submitXI(roomId, userId, xi, io);

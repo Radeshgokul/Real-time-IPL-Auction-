@@ -31,8 +31,9 @@ const startAuction = async (roomId, io, isFirst = false) => {
         auction.currentPlayer = nextPlayerId;
         auction.currentBid = nextPlayer.basePrice;
         auction.currentBidder = null;
-        auction.timer = 90; // Initial 90s
+        auction.timer = 60; // Initial 60s
         auction.status = 'running';
+        auction.skipVotes = [];
         await auction.save();
 
         const populatedAuction = await Auction.findById(auction._id).populate('currentPlayer');
@@ -129,6 +130,55 @@ const resolveAuctionRound = async (roomId, io) => {
     }
 };
 
+const handleSkipVote = async (roomId, userId, io) => {
+    try {
+        const auction = await Auction.findOne({ roomId }).populate('currentPlayer');
+        const room = await Room.findOne({ roomId }); // To count total users
+
+        if (!auction || auction.status !== 'running') return;
+
+        // Add vote if not already voted
+        if (!auction.skipVotes.includes(userId)) {
+            auction.skipVotes.push(userId);
+            await auction.save();
+        }
+
+        // Get count of ACTIVE teams (users who have picked a team)
+        const teamsCount = await Team.countDocuments({ roomId });
+
+        // Use teams count as the threshold because only team owners essentially "play"
+        // If necessary, we can use room.users.length, but teams is safer for active gameplay
+        const threshold = teamsCount > 0 ? teamsCount : room.users.length;
+
+        console.log(`[DEBUG] Skip Vote: ${auction.skipVotes.length}/${threshold} for Room ${roomId}`);
+
+        io.to(roomId).emit('auction:update', { auction });
+
+        if (auction.skipVotes.length >= threshold) {
+            console.log(`[DEBUG] Unanimous skip for room ${roomId}. Marking unsold.`);
+
+            // Clear existing timer
+            if (activeTimers[roomId]) {
+                clearInterval(activeTimers[roomId]);
+                delete activeTimers[roomId];
+            }
+
+            // Force timer to 0 to be safe (visual)
+            auction.timer = 0;
+            await auction.save();
+
+            // Trigger resolution (UNSOLD)
+            // Ensure no bidder is set so it resolves as unsold
+            auction.currentBidder = null;
+            await auction.save();
+
+            await resolveAuctionRound(roomId, io);
+        }
+    } catch (err) {
+        console.error('[DEBUG] Skip Vote Error:', err);
+    }
+};
+
 const endAuctionManually = async (roomId, io) => {
     try {
         const auction = await Auction.findOne({ roomId });
@@ -152,4 +202,4 @@ const resumeAuctionTimer = (roomId, io) => {
     runTimer(roomId, io);
 };
 
-module.exports = { startAuction, endAuctionManually, resumeAuctionTimer };
+module.exports = { startAuction, endAuctionManually, resumeAuctionTimer, handleSkipVote };
