@@ -56,35 +56,39 @@ const activeTimers = {}; // Global tracker for intervals
 const runTimer = (roomId, io) => {
     // Prevent multiple timers for the same room
     if (activeTimers[roomId]) {
-        console.log(`[DEBUG] Timer already running for room ${roomId}`);
         return;
     }
 
-    console.log(`[DEBUG] Starting timer for room ${roomId}`);
+    console.log(`[DEBUG] Starting robust timer for room ${roomId}`);
     const interval = setInterval(async () => {
         try {
-            const auction = await Auction.findOne({ roomId }).populate('currentPlayer');
+            // Atomic decrement: Only decrement if status is running and timer > 0
+            const auction = await Auction.findOneAndUpdate(
+                { roomId, status: 'running', timer: { $gt: 0 } },
+                { $inc: { timer: -1 } },
+                { new: true }
+            );
 
-            // If auction is missing or not running, stop timer
-            if (!auction || auction.status !== 'running') {
-                clearInterval(interval);
-                delete activeTimers[roomId];
-                return;
-            }
-
-            if (auction.timer > 0) {
-                auction.timer -= 1;
-                await auction.save();
+            if (auction) {
                 io.to(roomId).emit('auction:timer', { timer: auction.timer });
             } else {
-                clearInterval(interval);
-                delete activeTimers[roomId];
-                resolveAuctionRound(roomId, io);
+                // If update failed, check why: either 0 or not running
+                const currentAuction = await Auction.findOne({ roomId });
+                if (!currentAuction || currentAuction.status !== 'running') {
+                    console.log(`[DEBUG] Auction not running or missing for room ${roomId}. Stopping timer.`);
+                    clearInterval(interval);
+                    delete activeTimers[roomId];
+                } else if (currentAuction.timer === 0) {
+                    console.log(`[DEBUG] Timer reached 0 for room ${roomId}. Resolving round.`);
+                    clearInterval(interval);
+                    delete activeTimers[roomId];
+                    resolveAuctionRound(roomId, io);
+                }
             }
         } catch (err) {
-            console.error('Timer Error:', err);
-            clearInterval(interval);
-            delete activeTimers[roomId];
+            console.error('[ERROR] Timer Interval Error:', err);
+            // DO NOT clear interval here. Let it retry next second.
+            // This prevents VersionError or transient DB hiccups from killing the auction.
         }
     }, 1000);
 

@@ -135,31 +135,47 @@ module.exports = (io) => {
 
         socket.on('auction:bid', async ({ roomId, userId, amount }) => {
             try {
-                const auction = await Auction.findOne({ roomId }).populate('currentPlayer');
-                if (!auction || auction.status !== 'running') return;
-
                 const team = await Team.findOne({ roomId, userId });
                 if (!team) return socket.emit('error', 'No team found for user');
 
-                // Strict Validation
-                if (auction.currentBidder && amount <= auction.currentBid) {
-                    return socket.emit('error', 'Bid must be higher than current highest bid');
-                }
-                if (!auction.currentBidder && amount < auction.currentBid) {
-                    return socket.emit('error', 'Bid cannot be less than base price');
-                }
+                // Atomic Update to place bid
+                // We use findOneAndUpdate to ensure we only bid if:
+                // 1. Auction is running
+                // 2. Amount is > currentBid (or >= if NO bidder yet)
+                // 3. User has enough budget
+
+                // We do a pre-check for budget to avoid unnecessary DB pressure
                 if (amount > team.budget) {
                     return socket.emit('error', 'Insufficient budget');
                 }
 
-                auction.currentBid = amount;
-                auction.currentBidder = team._id;
-                auction.timer = 30; // Reset to 30s on every valid bid
-                await auction.save();
+                const updatedAuction = await Auction.findOneAndUpdate(
+                    {
+                        roomId,
+                        status: 'running',
+                        $or: [
+                            { currentBidder: null }, // First bid
+                            { currentBid: { $lt: amount } } // Higher bid
+                        ]
+                    },
+                    {
+                        $set: {
+                            currentBid: amount,
+                            currentBidder: team._id,
+                            timer: 30 // Reset to 30s
+                        }
+                    },
+                    { new: true }
+                ).populate('currentPlayer');
 
-                io.to(roomId).emit('auction:update', { auction });
+                if (!updatedAuction) {
+                    return socket.emit('error', 'Bid rejected (someone else might have bid higher or round ended)');
+                }
+
+                io.to(roomId).emit('auction:update', { auction: updatedAuction });
                 io.to(roomId).emit('auction:bidUpdate', { teamId: team._id, amount, teamName: team.name });
             } catch (err) {
+                console.error('[ERROR] Bid Error:', err);
                 socket.emit('error', err.message);
             }
         });
