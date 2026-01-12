@@ -41,9 +41,10 @@ const startAuction = async (roomId, io, isFirst = false) => {
             return;
         }
 
-        // 3. INITIALIZATION DATA (if queue is empty and it's the first start)
+        // 3. INITIALIZATION/REFILL DATA (if queue is empty)
         if (auction.auctionQueue.length === 0) {
-            const allPlayers = await Player.find({ status: 'available' });
+            // Find players that are available OR were previously unsold
+            const allPlayers = await Player.find({ status: { $in: ['available', 'unsold'] } });
             if (allPlayers.length > 0) {
                 console.log(`[DEBUG] Initializing player queue for room ${roomId}`);
                 const shuffledIds = allPlayers.sort(() => Math.random() - 0.5).map(p => p._id);
@@ -222,7 +223,7 @@ const resolveAuctionRound = async (roomId, io) => {
         if (auction.currentBidder) {
             // SOLD
             const player = await Player.findOneAndUpdate(
-                { _id: auction.currentPlayer._id, status: 'available' },
+                { _id: auction.currentPlayer._id, status: { $ne: 'sold' } },
                 {
                     $set: {
                         status: 'sold',
@@ -232,7 +233,6 @@ const resolveAuctionRound = async (roomId, io) => {
                 },
                 { new: true }
             );
-
             if (player) {
                 const team = await Team.findOneAndUpdate(
                     { _id: auction.currentBidder },
@@ -248,7 +248,7 @@ const resolveAuctionRound = async (roomId, io) => {
         } else {
             // Unsold (via skip)
             const player = await Player.findOneAndUpdate(
-                { _id: auction.currentPlayer._id, status: 'available' },
+                { _id: auction.currentPlayer._id, status: { $ne: 'sold' } },
                 { $set: { status: 'unsold' } },
                 { new: true }
             );
