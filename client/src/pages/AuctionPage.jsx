@@ -392,6 +392,23 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
                                 )}
                             </div>
 
+                            {/* HOST ONLY RECOVERY */}
+                            {isHost && (
+                                <div className="w-full pt-2 border-t border-white/5">
+                                    <button
+                                        onClick={() => {
+                                            if (confirm('RESTART PLAYER: This will reset the timer to 60s for the current player. Continue?')) {
+                                                socket.emit('auction:restartPlayer', { roomId, userId });
+                                            }
+                                        }}
+                                        className="w-full py-2 rounded-xl font-black text-[10px] uppercase tracking-widest text-ipl-gold border border-ipl-gold/30 hover:bg-ipl-gold/10 transition-all flex items-center justify-center gap-2 shadow-inner"
+                                    >
+                                        <span className="w-2 h-2 rounded-full bg-ipl-gold animate-pulse"></span>
+                                        Restart Current Player (Recovery)
+                                    </button>
+                                </div>
+                            )}
+
                             <p className="text-[9px] text-slate-500 font-bold uppercase tracking-[0.3em] flex items-center gap-2">
                                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
                                 Live Bidding Enabled

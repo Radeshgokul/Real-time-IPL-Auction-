@@ -94,8 +94,26 @@ module.exports = (io) => {
                     return socket.emit('error', 'Only host can end auction');
                 }
 
-                const { endAuctionManually } = require('../controllers/auctionController');
+                const { endAuctionManually, restartCurrentPlayer } = require('../controllers/auctionController');
                 await endAuctionManually(roomId, io);
+            } catch (err) {
+                socket.emit('error', err.message);
+            }
+        });
+
+        socket.on('auction:restartPlayer', async ({ roomId, userId }) => {
+            console.log(`[DEBUG] Received auction:restartPlayer for Room ${roomId} from User ${userId}`);
+            try {
+                const room = await Room.findOne({ roomId });
+                if (!room) return socket.emit('error', 'Room not found');
+
+                const hostId = room.host._id || room.host;
+                if (hostId.toString() !== userId.toString()) {
+                    return socket.emit('error', 'Only host can restart the player');
+                }
+
+                const { restartCurrentPlayer } = require('../controllers/auctionController');
+                await restartCurrentPlayer(roomId, io);
             } catch (err) {
                 socket.emit('error', err.message);
             }

@@ -100,6 +100,51 @@ const startAuction = async (roomId, io, isFirst = false) => {
     }
 };
 
+const restartCurrentPlayer = async (roomId, io) => {
+    try {
+        console.log(`[DEBUG] Manual Restart requested for room ${roomId}`);
+
+        // 1. Clear any active interval immediately to prevent collisions
+        if (activeTimers[roomId]) {
+            clearInterval(activeTimers[roomId]);
+            delete activeTimers[roomId];
+        }
+
+        // 2. Atomic update to reset the round
+        const countdownSeconds = 60;
+        const endTime = new Date(Date.now() + countdownSeconds * 1000);
+
+        const auction = await Auction.findOneAndUpdate(
+            { roomId, status: 'running' },
+            {
+                $set: {
+                    timer: countdownSeconds,
+                    auctionEndAt: endTime,
+                    skipVotes: [],
+                    lastEventAt: new Date()
+                }
+            },
+            { new: true }
+        ).populate('currentPlayer');
+
+        if (!auction) return;
+
+        // 3. Re-emit state to all clients
+        io.to(roomId).emit('auction:update', { auction });
+        io.to(roomId).emit('auction:timer', {
+            timer: countdownSeconds,
+            auctionEndAt: endTime
+        });
+
+        console.log(`[DEBUG] Restarted round for ${auction.currentPlayer?.name} in room ${roomId}`);
+
+        // 4. Start the server-side authoritative ticker
+        runTimer(roomId, io);
+    } catch (err) {
+        console.error('[DEBUG] Restart Current Player Error:', err);
+    }
+};
+
 const activeTimers = {};
 
 const runTimer = (roomId, io) => {
@@ -370,5 +415,6 @@ module.exports = {
     resumeAuctionTimer,
     handleSkipVote,
     resetAuction,
-    startWatchdog
+    startWatchdog,
+    restartCurrentPlayer
 };
