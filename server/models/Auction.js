@@ -4,11 +4,13 @@ const AuctionSchema = new mongoose.Schema({
     roomId: { type: String, required: true },
     seasonId: { type: mongoose.Schema.Types.ObjectId, ref: 'Season' },
     currentPlayer: { type: mongoose.Schema.Types.ObjectId, ref: 'Player' },
-    status: { type: String, enum: ['waiting', 'running', 'completed'], default: 'waiting' },
+    status: { type: String, enum: ['waiting', 'running', 'completed', 'resolving'], default: 'waiting' },
     currentBid: { type: Number, default: 0 },
     currentBidder: { type: mongoose.Schema.Types.ObjectId, ref: 'Team' },
     timer: { type: Number, default: 90 },
-    timerEndsAt: { type: Date }, // NEW: Absolute end time for self-healing
+    timerEndsAt: { type: Date },
+    lastWatchdogTick: { type: Date, default: Date.now }, // For interval heartbeat
+    resolvingSince: { type: Date }, // To track stalls in transition
     auctionQueue: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }],
     unsoldPlayers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }],
     skipVotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
