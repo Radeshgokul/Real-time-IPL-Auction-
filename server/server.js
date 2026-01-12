@@ -27,13 +27,16 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ipl-aucti
 const socketHandler = require('./socket/socketHandler');
 socketHandler(io);
 
-// RECOVERY: Restart timers for any auctions that were running when server died
-const { resumeAuctionTimer } = require('./controllers/auctionController');
+// RECOVERY & WATCHDOG
+const { resumeAuctionTimer, startWatchdog } = require('./controllers/auctionController');
 const Auction = require('./models/Auction');
 
 // Wait for DB, then recover
 mongoose.connection.once('open', async () => {
     try {
+        // Start the self-healing watchdog
+        startWatchdog(io);
+
         const runningAuctions = await Auction.find({ status: 'running' });
         if (runningAuctions.length > 0) {
             console.log(`[RECOVERY] Found ${runningAuctions.length} interrupted auctions. Resuming timers...`);

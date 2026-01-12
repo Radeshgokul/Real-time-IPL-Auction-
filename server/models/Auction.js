@@ -8,6 +8,7 @@ const AuctionSchema = new mongoose.Schema({
     currentBid: { type: Number, default: 0 },
     currentBidder: { type: mongoose.Schema.Types.ObjectId, ref: 'Team' },
     timer: { type: Number, default: 90 },
+    timerEndsAt: { type: Date }, // NEW: Absolute end time for self-healing
     auctionQueue: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }],
     unsoldPlayers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }],
     skipVotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]

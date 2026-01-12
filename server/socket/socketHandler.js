@@ -162,7 +162,8 @@ module.exports = (io) => {
                         $set: {
                             currentBid: amount,
                             currentBidder: team._id,
-                            timer: 30 // Reset to 30s
+                            timer: 30, // Reset visual timer
+                            timerEndsAt: new Date(Date.now() + 30000) // Reset absolute end time
                         }
                     },
                     { new: true }

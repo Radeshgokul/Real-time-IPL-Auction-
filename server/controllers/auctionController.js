@@ -28,10 +28,12 @@ const startAuction = async (roomId, io, isFirst = false) => {
         const nextPlayerId = auction.auctionQueue.shift();
         const nextPlayer = await Player.findById(nextPlayerId);
 
+        const countdownSeconds = 60;
         auction.currentPlayer = nextPlayerId;
         auction.currentBid = nextPlayer.basePrice;
         auction.currentBidder = null;
-        auction.timer = 60; // Initial 60s
+        auction.timer = countdownSeconds;
+        auction.timerEndsAt = new Date(Date.now() + countdownSeconds * 1000); // SET ABSOLUTE END TIME
         auction.status = 'running';
         auction.skipVotes = [];
         await auction.save();
@@ -52,6 +54,7 @@ const startAuction = async (roomId, io, isFirst = false) => {
 };
 
 const activeTimers = {}; // Global tracker for intervals
+const resolvingRooms = new Set(); // To prevent double resolution
 
 const runTimer = (roomId, io) => {
     // Prevent multiple timers for the same room
@@ -59,36 +62,52 @@ const runTimer = (roomId, io) => {
         return;
     }
 
-    console.log(`[DEBUG] Starting robust timer for room ${roomId}`);
+    console.log(`[DEBUG] Starting self-healing timer for room ${roomId}`);
+
+    // Initial Sync
+    let lastDbSync = Date.now();
+
     const interval = setInterval(async () => {
         try {
-            // Atomic decrement: Only decrement if status is running and timer > 0
-            const auction = await Auction.findOneAndUpdate(
-                { roomId, status: 'running', timer: { $gt: 0 } },
-                { $inc: { timer: -1 } },
-                { new: true }
-            );
+            const auction = await Auction.findOne({ roomId });
 
-            if (auction) {
-                io.to(roomId).emit('auction:timer', { timer: auction.timer });
-            } else {
-                // If update failed, check why: either 0 or not running
-                const currentAuction = await Auction.findOne({ roomId });
-                if (!currentAuction || currentAuction.status !== 'running') {
-                    console.log(`[DEBUG] Auction not running or missing for room ${roomId}. Stopping timer.`);
-                    clearInterval(interval);
-                    delete activeTimers[roomId];
-                } else if (currentAuction.timer === 0) {
-                    console.log(`[DEBUG] Timer reached 0 for room ${roomId}. Resolving round.`);
-                    clearInterval(interval);
-                    delete activeTimers[roomId];
-                    resolveAuctionRound(roomId, io);
+            if (!auction || auction.status !== 'running') {
+                console.log(`[DEBUG] Stop timer for room ${roomId}: status=${auction?.status}`);
+                clearInterval(interval);
+                delete activeTimers[roomId];
+                return;
+            }
+
+            // Calculate remaining time based on absolute timestamp
+            const now = Date.now();
+            const totalRemainingMs = Math.max(0, auction.timerEndsAt.getTime() - now);
+            const remainingSecs = Math.ceil(totalRemainingMs / 1000);
+
+            // Emit to clients (high frequency)
+            io.to(roomId).emit('auction:timer', { timer: remainingSecs });
+
+            // Sync back to DB occasionally (lower frequency to reduce load)
+            if (now - lastDbSync > 3000 || remainingSecs === 0) {
+                auction.timer = remainingSecs;
+                await auction.save();
+                lastDbSync = now;
+            }
+
+            if (remainingSecs === 0) {
+                console.log(`[DEBUG] Time Up for room ${roomId}. Resolving...`);
+                clearInterval(interval);
+                delete activeTimers[roomId];
+
+                if (!resolvingRooms.has(roomId)) {
+                    resolvingRooms.add(roomId);
+                    await resolveAuctionRound(roomId, io);
+                    resolvingRooms.delete(roomId);
                 }
             }
         } catch (err) {
-            console.error('[ERROR] Timer Interval Error:', err);
-            // DO NOT clear interval here. Let it retry next second.
-            // This prevents VersionError or transient DB hiccups from killing the auction.
+            console.error('[ERROR] Timer Loop Error:', err);
+            // Self-healing: Watchdog will catch it if it dies, 
+            // but we keep the interval alive for transient DB errors.
         }
     }, 1000);
 
@@ -99,6 +118,8 @@ const resolveAuctionRound = async (roomId, io) => {
     try {
         const auction = await Auction.findOne({ roomId }).populate('currentPlayer');
         if (!auction) return;
+
+        console.log(`[DEBUG] Resolving round for ${roomId}, Bidder: ${auction.currentBidder}`);
 
         if (auction.currentBidder) {
             // SOLD
@@ -128,6 +149,7 @@ const resolveAuctionRound = async (roomId, io) => {
 
         await auction.save();
 
+        // Delay before next player starts
         setTimeout(() => startAuction(roomId, io), 3000);
     } catch (err) {
         console.error('Resolve Round Error:', err);
@@ -137,22 +159,17 @@ const resolveAuctionRound = async (roomId, io) => {
 const handleSkipVote = async (roomId, userId, io) => {
     try {
         const auction = await Auction.findOne({ roomId }).populate('currentPlayer');
-        const room = await Room.findOne({ roomId }); // To count total users
+        const room = await Room.findOne({ roomId });
 
         if (!auction || auction.status !== 'running') return;
 
-        // Add vote if not already voted
         if (!auction.skipVotes.includes(userId)) {
             auction.skipVotes.push(userId);
             await auction.save();
         }
 
-        // Get count of ACTIVE teams (users who have picked a team)
         const teamsCount = await Team.countDocuments({ roomId });
-
-        // Use teams count as the threshold because only team owners essentially "play"
-        // If necessary, we can use room.users.length, but teams is safer for active gameplay
-        const threshold = teamsCount > 0 ? teamsCount : room.users.length;
+        const threshold = teamsCount > 0 ? teamsCount : (room.users?.length || 1);
 
         console.log(`[DEBUG] Skip Vote: ${auction.skipVotes.length}/${threshold} for Room ${roomId}`);
 
@@ -161,22 +178,21 @@ const handleSkipVote = async (roomId, userId, io) => {
         if (auction.skipVotes.length >= threshold) {
             console.log(`[DEBUG] Unanimous skip for room ${roomId}. Marking unsold.`);
 
-            // Clear existing timer
             if (activeTimers[roomId]) {
                 clearInterval(activeTimers[roomId]);
                 delete activeTimers[roomId];
             }
 
-            // Force timer to 0 to be safe (visual)
             auction.timer = 0;
-            await auction.save();
-
-            // Trigger resolution (UNSOLD)
-            // Ensure no bidder is set so it resolves as unsold
+            auction.timerEndsAt = new Date(); // Force expiry
             auction.currentBidder = null;
             await auction.save();
 
-            await resolveAuctionRound(roomId, io);
+            if (!resolvingRooms.has(roomId)) {
+                resolvingRooms.add(roomId);
+                await resolveAuctionRound(roomId, io);
+                resolvingRooms.delete(roomId);
+            }
         }
     } catch (err) {
         console.error('[DEBUG] Skip Vote Error:', err);
@@ -194,9 +210,13 @@ const endAuctionManually = async (roomId, io) => {
         auction.status = 'completed';
         await auction.save();
 
+        if (activeTimers[roomId]) {
+            clearInterval(activeTimers[roomId]);
+            delete activeTimers[roomId];
+        }
+
         io.to(roomId).emit('auction:end', { message: 'Auction finished!', teams, auction });
         io.to(roomId).emit('room:sync', { room, teams, auction });
-        console.log(`[DEBUG] Auction manually ended for Room ${roomId}`);
     } catch (err) {
         console.error('[DEBUG] Manual End Error:', err);
     }
@@ -206,40 +226,32 @@ const resetAuction = async (roomId, io) => {
     try {
         console.log(`[DEBUG] Resetting auction for Room ${roomId}`);
 
-        // 1. Reset Global Players (Assuming single tenant for now or shared pool)
         await Player.updateMany({}, {
             status: 'available',
             soldTo: null,
             soldPrice: null
         });
 
-        // 2. Reset Teams in this Room
         await Team.updateMany({ roomId }, {
             budget: 1300000000,
             squad: []
         });
 
-        // 3. Delete Auction State
         await Auction.deleteOne({ roomId });
 
-        // 4. Reset Room Status
         const room = await Room.findOneAndUpdate(
             { roomId },
             { status: 'waiting' },
             { new: true }
         ).populate('users', 'username isGuest');
 
-        // 5. Clear any active timers
         if (activeTimers[roomId]) {
             clearInterval(activeTimers[roomId]);
             delete activeTimers[roomId];
         }
 
-        // 6. Sync Clients back to Lobby
         const teams = await Team.find({ roomId }).populate('userId', 'username');
         io.to(roomId).emit('room:sync', { room, teams, auction: null });
-
-        console.log(`[DEBUG] Room ${roomId} reset to waiting.`);
     } catch (err) {
         console.error('[DEBUG] Reset Error:', err);
     }
@@ -249,4 +261,29 @@ const resumeAuctionTimer = (roomId, io) => {
     runTimer(roomId, io);
 };
 
-module.exports = { startAuction, endAuctionManually, resumeAuctionTimer, handleSkipVote, resetAuction };
+// WATCHDOG: Periodically check and restart stuck timers
+const startWatchdog = (io) => {
+    console.log('[WATCHDOG] Initialized');
+    setInterval(async () => {
+        try {
+            const runningAuctions = await Auction.find({ status: 'running' });
+            runningAuctions.forEach(auction => {
+                if (!activeTimers[auction.roomId]) {
+                    console.log(`[WATCHDOG] Found stuck auction ${auction.roomId}. Restarting timer...`);
+                    runTimer(auction.roomId, io);
+                }
+            });
+        } catch (err) {
+            console.error('[WATCHDOG] Error:', err);
+        }
+    }, 5000); // Check every 5 seconds
+};
+
+module.exports = {
+    startAuction,
+    endAuctionManually,
+    resumeAuctionTimer,
+    handleSkipVote,
+    resetAuction,
+    startWatchdog
+};
