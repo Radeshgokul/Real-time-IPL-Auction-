@@ -1,4 +1,5 @@
 require('dotenv').config();
+// Deployment Pulse: Hardened Initialization + Manual Recovery V1.2
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
