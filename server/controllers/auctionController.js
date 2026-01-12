@@ -72,7 +72,6 @@ const runTimer = (roomId, io) => {
             const auction = await Auction.findOne({ roomId });
 
             if (!auction || auction.status !== 'running') {
-                console.log(`[DEBUG] Stop timer for room ${roomId}: status=${auction?.status}`);
                 clearInterval(interval);
                 delete activeTimers[roomId];
                 return;
@@ -94,20 +93,19 @@ const runTimer = (roomId, io) => {
             }
 
             if (remainingSecs === 0) {
-                console.log(`[DEBUG] Time Up for room ${roomId}. Resolving...`);
-                clearInterval(interval);
-                delete activeTimers[roomId];
-
-                if (!resolvingRooms.has(roomId)) {
-                    resolvingRooms.add(roomId);
+                // Check if someone has bid
+                if (auction.currentBidder) {
+                    console.log(`[DEBUG] Time Up with Bidder for room ${roomId}. Resolving SOLD...`);
+                    clearInterval(interval);
+                    delete activeTimers[roomId];
                     await resolveAuctionRound(roomId, io);
-                    resolvingRooms.delete(roomId);
+                } else {
+                    // NO BIDDER: Wait indefinitely as requested by user.
+                    // The auction status remains 'running', timer visual stays 0.
                 }
             }
         } catch (err) {
             console.error('[ERROR] Timer Loop Error:', err);
-            // Self-healing: Watchdog will catch it if it dies, 
-            // but we keep the interval alive for transient DB errors.
         }
     }, 1000);
 
@@ -116,35 +114,58 @@ const runTimer = (roomId, io) => {
 
 const resolveAuctionRound = async (roomId, io) => {
     try {
-        const auction = await Auction.findOne({ roomId }).populate('currentPlayer');
+        // ATOMIC LOCK: Change status to 'waiting' to ensure only one process resolves this round
+        const auction = await Auction.findOneAndUpdate(
+            { roomId, status: 'running' },
+            { $set: { status: 'waiting' } },
+            { new: true }
+        ).populate('currentPlayer');
+
         if (!auction) return;
 
         console.log(`[DEBUG] Resolving round for ${roomId}, Bidder: ${auction.currentBidder}`);
 
         if (auction.currentBidder) {
-            // SOLD
-            const player = await Player.findById(auction.currentPlayer);
-            player.status = 'sold';
-            player.soldTo = auction.currentBidder;
-            player.soldPrice = auction.currentBid;
-            await player.save();
+            // SOLD: Atomic update to ensure player isn't sold twice
+            const player = await Player.findOneAndUpdate(
+                { _id: auction.currentPlayer._id, status: 'available' },
+                {
+                    $set: {
+                        status: 'sold',
+                        soldTo: auction.currentBidder,
+                        soldPrice: auction.currentBid
+                    }
+                },
+                { new: true }
+            );
 
-            const team = await Team.findById(auction.currentBidder);
-            team.budget -= auction.currentBid;
-            team.squad.push(player._id);
-            await team.save();
+            if (player) {
+                const team = await Team.findOneAndUpdate(
+                    { _id: auction.currentBidder },
+                    {
+                        $inc: { budget: -auction.currentBid },
+                        $addToSet: { squad: player._id } // Atomic duplicate prevention
+                    },
+                    { new: true }
+                ).populate('squad').populate('userId', 'username');
 
-            const populatedTeam = await Team.findById(team._id).populate('squad');
-
-            io.to(roomId).emit('auction:sold', { player, team: populatedTeam, price: auction.currentBid });
+                io.to(roomId).emit('auction:sold', { player, team, price: auction.currentBid });
+            }
         } else {
-            // UNSOLD
-            const player = await Player.findById(auction.currentPlayer);
-            player.status = 'unsold';
-            await player.save();
+            // UNSOLD (only via skip vote)
+            const player = await Player.findOneAndUpdate(
+                { _id: auction.currentPlayer._id, status: 'available' },
+                { $set: { status: 'unsold' } },
+                { new: true }
+            );
 
-            auction.unsoldPlayers.push(player._id);
-            io.to(roomId).emit('auction:unsold', { player });
+            if (player) {
+                await Auction.updateOne(
+                    { roomId },
+                    { $addToSet: { unsoldPlayers: player._id } }
+                );
+                io.to(roomId).emit('auction:unsold', { player });
+            }
         }
 
         await auction.save();
@@ -158,16 +179,16 @@ const resolveAuctionRound = async (roomId, io) => {
 
 const handleSkipVote = async (roomId, userId, io) => {
     try {
-        const auction = await Auction.findOne({ roomId }).populate('currentPlayer');
+        // Atomic vote registration
+        const auction = await Auction.findOneAndUpdate(
+            { roomId, status: 'running' },
+            { $addToSet: { skipVotes: userId } },
+            { new: true }
+        );
+
+        if (!auction) return;
+
         const room = await Room.findOne({ roomId });
-
-        if (!auction || auction.status !== 'running') return;
-
-        if (!auction.skipVotes.includes(userId)) {
-            auction.skipVotes.push(userId);
-            await auction.save();
-        }
-
         const teamsCount = await Team.countDocuments({ roomId });
         const threshold = teamsCount > 0 ? teamsCount : (room.users?.length || 1);
 
@@ -183,16 +204,12 @@ const handleSkipVote = async (roomId, userId, io) => {
                 delete activeTimers[roomId];
             }
 
+            // Force auction state for resolution as UNSOLD
             auction.timer = 0;
-            auction.timerEndsAt = new Date(); // Force expiry
             auction.currentBidder = null;
             await auction.save();
 
-            if (!resolvingRooms.has(roomId)) {
-                resolvingRooms.add(roomId);
-                await resolveAuctionRound(roomId, io);
-                resolvingRooms.delete(roomId);
-            }
+            await resolveAuctionRound(roomId, io);
         }
     } catch (err) {
         console.error('[DEBUG] Skip Vote Error:', err);
