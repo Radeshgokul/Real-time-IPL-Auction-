@@ -6,8 +6,28 @@ const { generateFixtures } = require('./leagueController');
 
 const startAuction = async (roomId, io, isFirst = false) => {
     try {
-        // ATOMIC TRANSITION: Only start if waiting or resolving
-        const auction = await Auction.findOneAndUpdate(
+        console.log(`[DEBUG] startAuction called for ${roomId} (isFirst: ${isFirst})`);
+
+        // 1. ATOMIC TRANSITION/UPSERT
+        // We try to find and update, but if it doesn't exist, we create it.
+        // Using findOneAndUpdate with upsert ensures only ONE document is ever created per roomId.
+        let auction = await Auction.findOneAndUpdate(
+            { roomId },
+            {
+                $setOnInsert: {
+                    status: 'waiting',
+                    auctionQueue: [],
+                    unsoldPlayers: [],
+                    skipVotes: [],
+                    lastEventAt: new Date()
+                }
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+
+        // 2. ATOMIC STATUS MOVE: Only proceed if transition is valid
+        // This prevents two simultaneous calls from both trying to pick a player.
+        auction = await Auction.findOneAndUpdate(
             { roomId, status: { $in: ['waiting', 'resolving'] } },
             {
                 $set: { status: 'running', lastEventAt: new Date() },
@@ -17,55 +37,63 @@ const startAuction = async (roomId, io, isFirst = false) => {
         );
 
         if (!auction) {
-            const exists = await Auction.findOne({ roomId });
-            if (!exists) {
-                console.log(`[DEBUG] Initializing NEW auction for room ${roomId}`);
-                const allPlayers = await Player.find({ status: 'available' });
-                const shuffledPlayers = allPlayers.sort(() => Math.random() - 0.5);
+            console.log(`[DEBUG] startAuction skipped: Already running or not eligible for ${roomId}`);
+            return;
+        }
 
-                auction = new Auction({
-                    roomId,
-                    status: 'running',
-                    auctionQueue: shuffledPlayers.map(p => p._id),
-                    lastEventAt: new Date()
-                });
-                await auction.save();
-            } else {
-                console.log(`[DEBUG] startAuction skipped: Already running for ${roomId}`);
-                return;
+        // 3. INITIALIZATION DATA (if queue is empty and it's the first start)
+        if (auction.auctionQueue.length === 0) {
+            const allPlayers = await Player.find({ status: 'available' });
+            if (allPlayers.length > 0) {
+                console.log(`[DEBUG] Initializing player queue for room ${roomId}`);
+                const shuffledIds = allPlayers.sort(() => Math.random() - 0.5).map(p => p._id);
+                auction = await Auction.findOneAndUpdate(
+                    { roomId },
+                    { $set: { auctionQueue: shuffledIds } },
+                    { new: true }
+                );
             }
         }
 
-        const teams = await Team.find({ roomId }).populate('squad');
-        const room = await Room.findOne({ roomId });
-
-        // Check if auction queue is empty
+        // 4. CHECK END CONDITION
         if (auction.auctionQueue.length === 0) {
+            console.log(`[DEBUG] Queue empty for ${roomId}, ending auction.`);
             return await endAuctionManually(roomId, io);
         }
 
-        // Pick next player (Atomic-ish)
-        const nextPlayerId = auction.auctionQueue.shift();
+        // 5. ATOMIC PLAYER PICK: Shift the queue and set active player
+        // We use $pop and $set to make it as atomic as possible
+        const nextPlayerId = auction.auctionQueue[0];
         const nextPlayer = await Player.findById(nextPlayerId);
 
         const countdownSeconds = 60;
-        auction.currentPlayer = nextPlayerId;
-        auction.currentBid = nextPlayer.basePrice;
-        auction.currentBidder = null;
-        auction.timer = countdownSeconds;
-        auction.auctionEndAt = new Date(Date.now() + countdownSeconds * 1000);
-        auction.skipVotes = [];
-        await auction.save();
+        const endTime = new Date(Date.now() + countdownSeconds * 1000);
 
-        const populatedAuction = await Auction.findById(auction._id).populate('currentPlayer');
+        auction = await Auction.findOneAndUpdate(
+            { roomId, status: 'running' },
+            {
+                $set: {
+                    currentPlayer: nextPlayerId,
+                    currentBid: nextPlayer.basePrice,
+                    currentBidder: null,
+                    timer: countdownSeconds,
+                    auctionEndAt: endTime,
+                    skipVotes: []
+                },
+                $pop: { auctionQueue: -1 } // Remove the first element
+            },
+            { new: true }
+        ).populate('currentPlayer');
+
+        if (!auction) return;
 
         if (isFirst) {
-            io.to(roomId).emit('auction:start', { firstPlayer: nextPlayer, auction: populatedAuction });
+            io.to(roomId).emit('auction:start', { firstPlayer: nextPlayer, auction });
         } else {
-            io.to(roomId).emit('auction:newPlayer', { player: nextPlayer, auction: populatedAuction });
+            io.to(roomId).emit('auction:newPlayer', { player: nextPlayer, auction });
         }
 
-        console.log(`[DEBUG] Emitted auction event for ${nextPlayer.name}`);
+        console.log(`[DEBUG] Started round for ${nextPlayer.name} in room ${roomId}`);
         runTimer(roomId, io);
     } catch (err) {
         console.error('[DEBUG] Start Auction Error:', err);
@@ -296,10 +324,14 @@ const startWatchdog = (io) => {
 
                 // 2. FORCE RESOLUTION CHECK (Time exceeded buffer)
                 if (auction.status === 'running') {
-                    // Safety: if running but no player, force a start
+                    // PHASE 3: INITIALIZATION GUARD
+                    // If running but NO PLAYER for > 5s, force initialization
                     if (!auction.currentPlayer) {
-                        console.log(`[WATCHDOG] Room ${auction.roomId} running but NO PLAYER. Forcing start...`);
-                        await startAuction(auction.roomId, io);
+                        const loadingMs = now - auction.updatedAt;
+                        if (loadingMs > 5000) {
+                            console.log(`[WATCHDOG] Room ${auction.roomId} STUCK in initialization. Forcing start...`);
+                            await startAuction(auction.roomId, io);
+                        }
                         continue;
                     }
 
@@ -310,7 +342,7 @@ const startWatchdog = (io) => {
                         continue;
                     }
 
-                    // 3. DEAD INTERVAL CHECK
+                    // 4. DEAD INTERVAL CHECK
                     const isLocalActive = !!activeTimers[auction.roomId];
                     const lastHeartbeatMs = now - (auction.lastWatchdogTick || auction.updatedAt);
                     if (!isLocalActive || lastHeartbeatMs > 7000) {
@@ -319,7 +351,7 @@ const startWatchdog = (io) => {
                     }
                 }
 
-                // 4. FINAL SAFETY FALLBACK: Total deadlock break
+                // 5. FINAL SAFETY FALLBACK: Total deadlock break
                 const deadMs = now - (auction.lastEventAt || auction.updatedAt);
                 if (deadMs > 60000) {
                     console.log(`[WATCHDOG] Global deadlock break for room ${auction.roomId}`);
