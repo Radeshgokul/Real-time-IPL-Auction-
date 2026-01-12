@@ -19,8 +19,8 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
     // High-frequency local ticker to avoid visual freezes
     useEffect(() => {
         const calculateRemaining = () => {
-            if (!auction?.timerEndsAt || auction.status !== 'running') return 0;
-            const end = new Date(auction.timerEndsAt).getTime();
+            if (!auction?.auctionEndAt || auction.status !== 'running') return 0;
+            const end = new Date(auction.auctionEndAt).getTime();
             const now = Date.now();
             return Math.max(0, Math.ceil((end - now) / 1000));
         };
@@ -31,13 +31,10 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
         const ticker = setInterval(() => {
             const rem = calculateRemaining();
             setLocalTimer(rem);
-
-            // If it hits 0 and there's a bidder, we expect server to resolve soon.
-            // If no bidder, it stays at 0 as requested.
         }, 100);
 
         return () => clearInterval(ticker);
-    }, [auction?.timerEndsAt, auction?.status]);
+    }, [auction?.auctionEndAt, auction?.status]);
 
     // Refs to constant state for socket listeners
     const auctionTeamsRef = useRef(teams);
@@ -83,7 +80,11 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
         const handleAuctionUpdate = (data) => setAuction(data.auction);
 
         const handleTimer = (data) => {
-            setAuction(prev => ({ ...prev, timer: data.timer }));
+            setAuction(prev => ({
+                ...prev,
+                timer: data.timer,
+                auctionEndAt: data.auctionEndAt || prev.auctionEndAt
+            }));
         };
 
         const handleBidUpdate = (data) => {

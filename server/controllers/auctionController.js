@@ -6,25 +6,30 @@ const { generateFixtures } = require('./leagueController');
 
 const startAuction = async (roomId, io, isFirst = false) => {
     try {
-        let auction = await Auction.findOne({ roomId });
-        const teams = await Team.find({ roomId }).populate('squad');
-        const room = await Room.findOne({ roomId });
+        // ATOMIC TRANSITION: Only start if waiting or resolving
+        const auction = await Auction.findOneAndUpdate(
+            { roomId, status: { $in: ['waiting', 'resolving'] } },
+            {
+                $set: { status: 'running', lastEventAt: new Date() },
+                $unset: { resolvingSince: "" }
+            },
+            { new: true }
+        );
 
         if (!auction) {
-            auction = new Auction({ roomId, status: 'running' });
-            // Load and shuffle all players
-            const allPlayers = await Player.find({ status: 'available' });
-            const shuffledPlayers = allPlayers.sort(() => Math.random() - 0.5);
-            auction.auctionQueue = shuffledPlayers.map(p => p._id);
-            await auction.save();
+            console.log(`[DEBUG] startAuction skipped: Already running or not found for ${roomId}`);
+            return;
         }
+
+        const teams = await Team.find({ roomId }).populate('squad');
+        const room = await Room.findOne({ roomId });
 
         // Check if auction queue is empty
         if (auction.auctionQueue.length === 0) {
             return await endAuctionManually(roomId, io);
         }
 
-        // Pick next player
+        // Pick next player (Atomic-ish)
         const nextPlayerId = auction.auctionQueue.shift();
         const nextPlayer = await Player.findById(nextPlayerId);
 
@@ -33,8 +38,7 @@ const startAuction = async (roomId, io, isFirst = false) => {
         auction.currentBid = nextPlayer.basePrice;
         auction.currentBidder = null;
         auction.timer = countdownSeconds;
-        auction.timerEndsAt = new Date(Date.now() + countdownSeconds * 1000); // SET ABSOLUTE END TIME
-        auction.status = 'running';
+        auction.auctionEndAt = new Date(Date.now() + countdownSeconds * 1000);
         auction.skipVotes = [];
         await auction.save();
 
@@ -53,15 +57,11 @@ const startAuction = async (roomId, io, isFirst = false) => {
     }
 };
 
-const activeTimers = {}; // Global tracker for intervals
-const resolvingRooms = new Set(); // To prevent double resolution
+const activeTimers = {};
 
 const runTimer = (roomId, io) => {
-    // CRITICAL: Clear any existing interval for this room to prevent leaks/overlap
     if (activeTimers[roomId]) {
-        console.log(`[DEBUG] Clearing zombie interval for room ${roomId}`);
         clearInterval(activeTimers[roomId]);
-        delete activeTimers[roomId];
     }
 
     console.log(`[DEBUG] Starting authoritative timer for room ${roomId}`);
@@ -78,16 +78,16 @@ const runTimer = (roomId, io) => {
             }
 
             const now = Date.now();
-            const totalRemainingMs = auction.timerEndsAt.getTime() - now;
+            const totalRemainingMs = auction.auctionEndAt.getTime() - now;
             const remainingSecs = Math.max(0, Math.ceil(totalRemainingMs / 1000));
 
-            // Pulse to clients every second (for sync, not drive)
+            // Mandatory: Pulse state every second
             io.to(roomId).emit('auction:timer', {
                 timer: remainingSecs,
-                timerEndsAt: auction.timerEndsAt
+                auctionEndAt: auction.auctionEndAt
             });
 
-            // HEARTBEAT & DB SYNC: Keep the DB updated occasionally
+            // Update heartbeat
             if (now - lastDbSync > 2000 || remainingSecs === 0) {
                 auction.timer = remainingSecs;
                 auction.lastWatchdogTick = new Date();
@@ -95,17 +95,11 @@ const runTimer = (roomId, io) => {
                 lastDbSync = now;
             }
 
-            // ATOMIC TRIGGER: Check for expiry strictly against server time
-            if (now >= auction.timerEndsAt.getTime()) {
-                if (auction.currentBidder) {
-                    console.log(`[DEBUG] Deadline reached for ${roomId}. Resolving SOLD...`);
-                    clearInterval(interval);
-                    delete activeTimers[roomId];
-                    await resolveAuctionRound(roomId, io);
-                } else {
-                    // NO BIDDER: Wait indefinitely as requested by user.
-                    // Visuals on client will stay at 0s because now >= timerEndsAt.
-                }
+            // Normal resolution trigger
+            if (now >= auction.auctionEndAt.getTime() && auction.currentBidder) {
+                clearInterval(interval);
+                delete activeTimers[roomId];
+                await resolveAuctionRound(roomId, io);
             }
         } catch (err) {
             console.error('[ERROR] Timer Interval Error:', err);
@@ -117,23 +111,28 @@ const runTimer = (roomId, io) => {
 
 const resolveAuctionRound = async (roomId, io) => {
     try {
-        // ATOMIC LOCK: Move to 'resolving' state to prevent duplicate runs
+        // ATOMIC & IDEMPOTENT LOCK: Move to 'resolving' state
         const auction = await Auction.findOneAndUpdate(
             { roomId, status: 'running' },
             {
                 $set: {
                     status: 'resolving',
-                    resolvingSince: new Date()
+                    resolvingSince: new Date(),
+                    lastEventAt: new Date()
                 }
             },
             { new: true }
         ).populate('currentPlayer');
 
-        if (!auction) return;
+        if (!auction) {
+            console.log(`[DEBUG] Resolve skipped: Round not running for ${roomId}`);
+            return;
+        }
 
         console.log(`[DEBUG] Resolving round for ${roomId}...`);
 
         if (auction.currentBidder) {
+            // SOLD
             const player = await Player.findOneAndUpdate(
                 { _id: auction.currentPlayer._id, status: 'available' },
                 {
@@ -177,10 +176,7 @@ const resolveAuctionRound = async (roomId, io) => {
 
         // Delay 3s then start next player
         setTimeout(() => {
-            // Verify if still in resolving state before starting next
-            startAuction(roomId, io).catch(err => {
-                console.error(`[FATAL] Failed to start next auction player for ${roomId}:`, err);
-            });
+            startAuction(roomId, io).catch(console.error);
         }, 3000);
 
     } catch (err) {
@@ -192,7 +188,10 @@ const handleSkipVote = async (roomId, userId, io) => {
     try {
         const auction = await Auction.findOneAndUpdate(
             { roomId, status: 'running' },
-            { $addToSet: { skipVotes: userId } },
+            {
+                $addToSet: { skipVotes: userId },
+                $set: { lastEventAt: new Date() }
+            },
             { new: true }
         );
 
@@ -205,14 +204,13 @@ const handleSkipVote = async (roomId, userId, io) => {
         io.to(roomId).emit('auction:update', { auction });
 
         if (auction.skipVotes.length >= threshold) {
-            console.log(`[DEBUG] Unanimous skip for room ${roomId}`);
             if (activeTimers[roomId]) {
                 clearInterval(activeTimers[roomId]);
                 delete activeTimers[roomId];
             }
-            // Explicitly clear bidder and force 0 for resolve
             auction.currentBidder = null;
             auction.timer = 0;
+            auction.auctionEndAt = new Date();
             await auction.save();
             await resolveAuctionRound(roomId, io);
         }
@@ -223,7 +221,7 @@ const handleSkipVote = async (roomId, userId, io) => {
 
 const endAuctionManually = async (roomId, io) => {
     try {
-        const auction = await Auction.findOneAndUpdate({ roomId }, { $set: { status: 'completed' } }, { new: true });
+        const auction = await Auction.findOneAndUpdate({ roomId }, { $set: { status: 'completed', lastEventAt: new Date() } }, { new: true });
         const room = await Room.findOne({ roomId });
         const teams = await Team.find({ roomId }).populate('squad');
 
@@ -262,43 +260,52 @@ const resumeAuctionTimer = (roomId, io) => {
     runTimer(roomId, io);
 };
 
-// WATCHDOG: Aggressive monitoring of all phases
+// MANDATORY WATCHDOG: Force-resolve and Force-recover
 const startWatchdog = (io) => {
-    console.log('[WATCHDOG] Monitoring active...');
+    console.log('[WATCHDOG] Mandatory protection layer active.');
     setInterval(async () => {
         try {
             const now = new Date();
             const auctions = await Auction.find({ status: { $in: ['running', 'resolving'] } });
 
             for (const auction of auctions) {
-                // 1. STALLED TRANSITION CHECK
+                // 1. STALLED RESOLUTION CHECK
                 if (auction.status === 'resolving') {
                     const stalledMs = now - (auction.resolvingSince || auction.updatedAt);
-                    if (stalledMs > 10000) { // Stalled in 'resolving' for > 10s
-                        console.log(`[WATCHDOG] Room ${auction.roomId} stalled in resolving. Forcing start...`);
+                    if (stalledMs > 8000) {
+                        console.log(`[WATCHDOG] Force-starting next player for room ${auction.roomId}`);
                         await startAuction(auction.roomId, io);
                     }
                     continue;
                 }
 
-                // 2. DEAD INTERVAL CHECK (Status is 'running')
+                // 2. FORCE RESOLUTION CHECK (Time exceeded buffer)
                 if (auction.status === 'running') {
+                    const timeExceeded = now.getTime() > (auction.auctionEndAt.getTime() + 2000);
+                    if (timeExceeded && auction.currentBidder) {
+                        console.log(`[WATCHDOG] Force-resolving expired round for room ${auction.roomId}`);
+                        await resolveAuctionRound(auction.roomId, io);
+                        continue;
+                    }
+
+                    // 3. DEAD INTERVAL CHECK
                     const isLocalActive = !!activeTimers[auction.roomId];
                     const lastHeartbeatMs = now - (auction.lastWatchdogTick || auction.updatedAt);
-
                     if (!isLocalActive || lastHeartbeatMs > 7000) {
-                        console.log(`[WATCHDOG] Room ${auction.roomId} missing heartbeat (${lastHeartbeatMs}ms). Restarting...`);
-                        // Ensure old interval is definitely dead
-                        if (activeTimers[auction.roomId]) {
-                            clearInterval(activeTimers[auction.roomId]);
-                            delete activeTimers[auction.roomId];
-                        }
+                        console.log(`[WATCHDOG] Restarting dead interval for room ${auction.roomId}`);
                         runTimer(auction.roomId, io);
                     }
                 }
+
+                // 4. FINAL SAFETY FALLBACK: Total deadlock break
+                const deadMs = now - (auction.lastEventAt || auction.updatedAt);
+                if (deadMs > 60000) {
+                    console.log(`[WATCHDOG] Global deadlock break for room ${auction.roomId}`);
+                    await startAuction(auction.roomId, io);
+                }
             }
         } catch (err) {
-            console.error('[WATCHDOG] Scan Error:', err);
+            console.error('[WATCHDOG] Critical Scan Error:', err);
         }
     }, 5000);
 };

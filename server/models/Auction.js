@@ -8,9 +8,10 @@ const AuctionSchema = new mongoose.Schema({
     currentBid: { type: Number, default: 0 },
     currentBidder: { type: mongoose.Schema.Types.ObjectId, ref: 'Team' },
     timer: { type: Number, default: 90 },
-    timerEndsAt: { type: Date },
-    lastWatchdogTick: { type: Date, default: Date.now }, // For interval heartbeat
-    resolvingSince: { type: Date }, // To track stalls in transition
+    auctionEndAt: { type: Date },
+    lastWatchdogTick: { type: Date, default: Date.now },
+    lastEventAt: { type: Date, default: Date.now }, // Deadlock break tracking
+    resolvingSince: { type: Date },
     auctionQueue: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }],
     unsoldPlayers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Player' }],
     skipVotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]

@@ -154,16 +154,17 @@ module.exports = (io) => {
                         roomId,
                         status: 'running',
                         $or: [
-                            { currentBidder: null }, // First bid
-                            { currentBid: { $lt: amount } } // Higher bid
+                            { currentBidder: null },
+                            { currentBid: { $lt: amount } }
                         ]
                     },
                     {
                         $set: {
                             currentBid: amount,
                             currentBidder: team._id,
-                            timer: 30, // Reset visual timer
-                            timerEndsAt: new Date(Date.now() + 30000) // Reset absolute end time
+                            timer: 30,
+                            auctionEndAt: new Date(Date.now() + 30000),
+                            lastEventAt: new Date()
                         }
                     },
                     { new: true }
