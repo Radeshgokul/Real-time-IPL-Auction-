@@ -57,9 +57,14 @@ const activeTimers = {}; // Global tracker for intervals
 const resolvingRooms = new Set(); // To prevent double resolution
 
 const runTimer = (roomId, io) => {
-    if (activeTimers[roomId]) return;
+    // CRITICAL: Clear any existing interval for this room to prevent leaks/overlap
+    if (activeTimers[roomId]) {
+        console.log(`[DEBUG] Clearing zombie interval for room ${roomId}`);
+        clearInterval(activeTimers[roomId]);
+        delete activeTimers[roomId];
+    }
 
-    console.log(`[DEBUG] Starting stabilized timer for room ${roomId}`);
+    console.log(`[DEBUG] Starting authoritative timer for room ${roomId}`);
     let lastDbSync = Date.now();
 
     const interval = setInterval(async () => {
@@ -73,12 +78,16 @@ const runTimer = (roomId, io) => {
             }
 
             const now = Date.now();
-            const totalRemainingMs = Math.max(0, auction.timerEndsAt.getTime() - now);
-            const remainingSecs = Math.ceil(totalRemainingMs / 1000);
+            const totalRemainingMs = auction.timerEndsAt.getTime() - now;
+            const remainingSecs = Math.max(0, Math.ceil(totalRemainingMs / 1000));
 
-            io.to(roomId).emit('auction:timer', { timer: remainingSecs });
+            // Pulse to clients every second (for sync, not drive)
+            io.to(roomId).emit('auction:timer', {
+                timer: remainingSecs,
+                timerEndsAt: auction.timerEndsAt
+            });
 
-            // HEARTBEAT & DB SYNC: Update lastWatchdogTick to prove this timer is ALIVE
+            // HEARTBEAT & DB SYNC: Keep the DB updated occasionally
             if (now - lastDbSync > 2000 || remainingSecs === 0) {
                 auction.timer = remainingSecs;
                 auction.lastWatchdogTick = new Date();
@@ -86,10 +95,17 @@ const runTimer = (roomId, io) => {
                 lastDbSync = now;
             }
 
-            if (remainingSecs === 0 && auction.currentBidder) {
-                clearInterval(interval);
-                delete activeTimers[roomId];
-                await resolveAuctionRound(roomId, io);
+            // ATOMIC TRIGGER: Check for expiry strictly against server time
+            if (now >= auction.timerEndsAt.getTime()) {
+                if (auction.currentBidder) {
+                    console.log(`[DEBUG] Deadline reached for ${roomId}. Resolving SOLD...`);
+                    clearInterval(interval);
+                    delete activeTimers[roomId];
+                    await resolveAuctionRound(roomId, io);
+                } else {
+                    // NO BIDDER: Wait indefinitely as requested by user.
+                    // Visuals on client will stay at 0s because now >= timerEndsAt.
+                }
             }
         } catch (err) {
             console.error('[ERROR] Timer Interval Error:', err);

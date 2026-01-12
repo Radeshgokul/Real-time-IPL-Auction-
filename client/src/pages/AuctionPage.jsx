@@ -14,6 +14,31 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
     // const bidSound = new Audio('/sounds/bid.mp3');
     // const soldSound = new Audio('/sounds/sold.mp3');
 
+    const [localTimer, setLocalTimer] = useState(0);
+
+    // High-frequency local ticker to avoid visual freezes
+    useEffect(() => {
+        const calculateRemaining = () => {
+            if (!auction?.timerEndsAt || auction.status !== 'running') return 0;
+            const end = new Date(auction.timerEndsAt).getTime();
+            const now = Date.now();
+            return Math.max(0, Math.ceil((end - now) / 1000));
+        };
+
+        // Initial set
+        setLocalTimer(calculateRemaining());
+
+        const ticker = setInterval(() => {
+            const rem = calculateRemaining();
+            setLocalTimer(rem);
+
+            // If it hits 0 and there's a bidder, we expect server to resolve soon.
+            // If no bidder, it stays at 0 as requested.
+        }, 100);
+
+        return () => clearInterval(ticker);
+    }, [auction?.timerEndsAt, auction?.status]);
+
     // Refs to constant state for socket listeners
     const auctionTeamsRef = useRef(teams);
     const userIdRef = useRef(userId);
@@ -262,8 +287,8 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
                     <div className="flex gap-4 items-center">
                         <div className="bg-slate-800/80 border border-slate-700 px-6 py-3 rounded-2xl flex flex-col items-center min-w-[120px]">
                             <span className="text-[9px] text-slate-400 font-bold uppercase mb-1">Time Remaining</span>
-                            <span className={`text-3xl font-mono font-black ${auction?.timer < 10 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
-                                {auction?.timer || 0}s
+                            <span className={`text-3xl font-mono font-black ${localTimer < 10 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                                {localTimer}s
                             </span>
                         </div>
                         <div className="bg-slate-800/80 border border-slate-700 px-6 py-3 rounded-2xl flex flex-col items-center min-w-[160px]">
