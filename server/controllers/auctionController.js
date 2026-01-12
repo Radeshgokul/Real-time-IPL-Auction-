@@ -17,8 +17,23 @@ const startAuction = async (roomId, io, isFirst = false) => {
         );
 
         if (!auction) {
-            console.log(`[DEBUG] startAuction skipped: Already running or not found for ${roomId}`);
-            return;
+            const exists = await Auction.findOne({ roomId });
+            if (!exists) {
+                console.log(`[DEBUG] Initializing NEW auction for room ${roomId}`);
+                const allPlayers = await Player.find({ status: 'available' });
+                const shuffledPlayers = allPlayers.sort(() => Math.random() - 0.5);
+
+                auction = new Auction({
+                    roomId,
+                    status: 'running',
+                    auctionQueue: shuffledPlayers.map(p => p._id),
+                    lastEventAt: new Date()
+                });
+                await auction.save();
+            } else {
+                console.log(`[DEBUG] startAuction skipped: Already running for ${roomId}`);
+                return;
+            }
         }
 
         const teams = await Team.find({ roomId }).populate('squad');
@@ -281,6 +296,13 @@ const startWatchdog = (io) => {
 
                 // 2. FORCE RESOLUTION CHECK (Time exceeded buffer)
                 if (auction.status === 'running') {
+                    // Safety: if running but no player, force a start
+                    if (!auction.currentPlayer) {
+                        console.log(`[WATCHDOG] Room ${auction.roomId} running but NO PLAYER. Forcing start...`);
+                        await startAuction(auction.roomId, io);
+                        continue;
+                    }
+
                     const timeExceeded = now.getTime() > (auction.auctionEndAt.getTime() + 2000);
                     if (timeExceeded && auction.currentBidder) {
                         console.log(`[WATCHDOG] Force-resolving expired round for room ${auction.roomId}`);

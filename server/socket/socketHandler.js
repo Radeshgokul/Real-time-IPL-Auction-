@@ -76,7 +76,6 @@ module.exports = (io) => {
                 io.to(roomId).emit('room:sync', { room, teams: populatedTeams });
 
                 console.log('[DEBUG] Calling startAuction controller...');
-                console.log('[DEBUG] Calling startAuction controller...');
                 startAuction(roomId, io, true); // Pass true for isFirst
             } catch (err) {
                 console.error('[DEBUG] Error in room:startAuction:', err);
