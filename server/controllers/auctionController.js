@@ -409,6 +409,60 @@ const startWatchdog = (io) => {
     }, 5000);
 };
 
+const emergencyRestartPlayer = async (roomId, io) => {
+    try {
+        console.log(`[DEBUG] EMERGENCY Restart requested for room ${roomId}`);
+
+        // 1. Clear any active interval immediately
+        if (activeTimers[roomId]) {
+            clearInterval(activeTimers[roomId]);
+            delete activeTimers[roomId];
+        }
+
+        // 2. Force Room Unlock
+        await Room.updateOne({ roomId }, { $set: { isLocked: false } });
+
+        // 3. Atomic hard-reset of the auction round
+        const countdownSeconds = 60;
+        const endTime = new Date(Date.now() + countdownSeconds * 1000);
+
+        const auction = await Auction.findOneAndUpdate(
+            { roomId },
+            {
+                $set: {
+                    status: 'running',
+                    timer: countdownSeconds,
+                    auctionEndAt: endTime,
+                    skipVotes: [],
+                    lastEventAt: new Date(),
+                    lastWatchdogTick: new Date(),
+                },
+                $unset: { resolvingSince: "" }
+            },
+            { new: true }
+        ).populate('currentPlayer');
+
+        if (!auction) {
+            console.log(`[DEBUG] Emergency Restart: No auction state found for ${roomId}`);
+            return;
+        }
+
+        // 4. Re-emit state to all clients
+        io.to(roomId).emit('auction:update', { auction });
+        io.to(roomId).emit('auction:timer', {
+            timer: countdownSeconds,
+            auctionEndAt: endTime
+        });
+
+        console.log(`[DEBUG] EMERGENCY Restarted round for ${auction.currentPlayer?.name} in room ${roomId}`);
+
+        // 5. Start the server-side authoritative ticker
+        runTimer(roomId, io);
+    } catch (err) {
+        console.error('[DEBUG] Emergency Restart Error:', err);
+    }
+};
+
 module.exports = {
     startAuction,
     endAuctionManually,
@@ -416,5 +470,6 @@ module.exports = {
     handleSkipVote,
     resetAuction,
     startWatchdog,
-    restartCurrentPlayer
+    restartCurrentPlayer,
+    emergencyRestartPlayer
 };

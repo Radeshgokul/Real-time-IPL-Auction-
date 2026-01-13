@@ -394,7 +394,7 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
 
                             {/* HOST ONLY RECOVERY */}
                             {isHost && (
-                                <div className="w-full pt-2 border-t border-white/5">
+                                <div className="w-full pt-2 border-t border-white/5 space-y-3">
                                     <button
                                         onClick={() => {
                                             if (confirm('RESTART PLAYER: This will reset the timer to 60s for the current player. Continue?')) {
@@ -406,6 +406,27 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
                                         <span className="w-2 h-2 rounded-full bg-ipl-gold animate-pulse"></span>
                                         Restart Current Player (Recovery)
                                     </button>
+
+                                    {/* EMERGENCY RECOVERY PANEL */}
+                                    <div className="p-4 border-2 border-red-600/50 bg-red-900/20 rounded-2xl">
+                                        <h4 className="text-[10px] font-black uppercase text-red-500 tracking-widest mb-2 flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                                            Emergency Recovery Panel (Host ONLY)
+                                        </h4>
+                                        <button
+                                            onClick={() => {
+                                                if (confirm('CRITICAL ACTION: This will bypass ALL state checks, force-unlock the room, and hard-reset the current player. Only use this if the auction is completely stuck at 0s. Continue?')) {
+                                                    socket.emit('auction:emergencyRestart', { roomId, userId });
+                                                }
+                                            }}
+                                            className="w-full py-3 rounded-xl font-black text-[12px] uppercase tracking-tighter bg-red-600 text-white hover:bg-red-700 transition-all shadow-lg active:scale-95"
+                                        >
+                                            Force Restart Current Player
+                                        </button>
+                                        <p className="mt-2 text-[8px] text-red-400 font-bold uppercase text-center leading-tight">
+                                            Bypasses timer status, vote completion, and auction locks.
+                                        </p>
+                                    </div>
                                 </div>
                             )}
 

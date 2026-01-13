@@ -119,6 +119,24 @@ module.exports = (io) => {
             }
         });
 
+        socket.on('auction:emergencyRestart', async ({ roomId, userId }) => {
+            console.log(`[DEBUG] Received auction:emergencyRestart for Room ${roomId} from User ${userId}`);
+            try {
+                const room = await Room.findOne({ roomId });
+                if (!room) return socket.emit('error', 'Room not found');
+
+                const hostId = room.host._id || room.host;
+                if (hostId.toString() !== userId.toString()) {
+                    return socket.emit('error', 'Only host can perform emergency restart');
+                }
+
+                const { emergencyRestartPlayer } = require('../controllers/auctionController');
+                await emergencyRestartPlayer(roomId, io);
+            } catch (err) {
+                socket.emit('error', err.message);
+            }
+        });
+
         socket.on('auction:proceedToPlayingXI', async ({ roomId, userId }) => {
             console.log(`[DEBUG] Received auction:proceedToPlayingXI for Room ${roomId} from User ${userId}`);
             try {
