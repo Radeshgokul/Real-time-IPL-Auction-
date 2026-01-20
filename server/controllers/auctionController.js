@@ -147,6 +147,7 @@ const restartCurrentPlayer = async (roomId, io) => {
 };
 
 const activeTimers = {};
+const roomStates = {}; // In-memory cache for room-specific auction state (e.g. last broadcasted time)
 
 const runTimer = (roomId, io) => {
     if (activeTimers[roomId]) {
@@ -154,14 +155,13 @@ const runTimer = (roomId, io) => {
     }
 
     console.log(`[DEBUG] Starting authoritative timer for room ${roomId}`);
-    let lastDbSync = Date.now();
 
-    const interval = setInterval(async () => {
+    // Pulse once immediately to ensure clients are synced
+    const pulseTimer = async () => {
         try {
             const auction = await Auction.findOne({ roomId });
-
             if (!auction || auction.status !== 'running') {
-                clearInterval(interval);
+                clearInterval(activeTimers[roomId]);
                 delete activeTimers[roomId];
                 return;
             }
@@ -170,32 +170,37 @@ const runTimer = (roomId, io) => {
             const totalRemainingMs = auction.auctionEndAt.getTime() - now;
             const remainingSecs = Math.max(0, Math.ceil(totalRemainingMs / 1000));
 
-            // Mandatory: Pulse state every second
+            // Pulse to clients
             io.to(roomId).emit('auction:timer', {
                 timer: remainingSecs,
                 auctionEndAt: auction.auctionEndAt
             });
 
-            // Update heartbeat
-            if (now - lastDbSync > 2000 || remainingSecs === 0) {
-                auction.timer = remainingSecs;
-                auction.lastWatchdogTick = new Date();
-                await auction.save();
-                lastDbSync = now;
+            // Trigger resolution if time is up
+            if (now >= auction.auctionEndAt.getTime()) {
+                clearInterval(activeTimers[roomId]);
+                delete activeTimers[roomId];
+                console.log(`[DEBUG] Time expired for room ${roomId}. Resolving...`);
+                await resolveAuctionRound(roomId, io);
+                return;
             }
 
-            // Normal resolution trigger
-            if (now >= auction.auctionEndAt.getTime() && auction.currentBidder) {
-                clearInterval(interval);
-                delete activeTimers[roomId];
-                await resolveAuctionRound(roomId, io);
+            // Pulse DB heartbeat every 5 seconds or if it just started
+            if (!auction.lastWatchdogTick || now - auction.lastWatchdogTick.getTime() > 5000) {
+                await Auction.updateOne({ roomId }, {
+                    $set: {
+                        timer: remainingSecs,
+                        lastWatchdogTick: new Date()
+                    }
+                });
             }
         } catch (err) {
-            console.error('[ERROR] Timer Interval Error:', err);
+            console.error('[ERROR] Timer Pulsing Error:', err);
         }
-    }, 1000);
+    };
 
-    activeTimers[roomId] = interval;
+    activeTimers[roomId] = setInterval(pulseTimer, 1000);
+    pulseTimer(); // Immediate first pulse
 };
 
 const resolveAuctionRound = async (roomId, io) => {
@@ -206,6 +211,7 @@ const resolveAuctionRound = async (roomId, io) => {
             {
                 $set: {
                     status: 'resolving',
+                    timer: 0, // Reset timer visually
                     resolvingSince: new Date(),
                     lastEventAt: new Date()
                 }
@@ -214,7 +220,7 @@ const resolveAuctionRound = async (roomId, io) => {
         ).populate('currentPlayer');
 
         if (!auction) {
-            console.log(`[DEBUG] Resolve skipped: Round not running for ${roomId}`);
+            console.log(`[DEBUG] Resolve skipped: Round not running or already resolving for ${roomId}`);
             return;
         }
 
@@ -370,7 +376,6 @@ const startWatchdog = (io) => {
                 // 2. FORCE RESOLUTION CHECK (Time exceeded buffer)
                 if (auction.status === 'running') {
                     // PHASE 3: INITIALIZATION GUARD
-                    // If running but NO PLAYER for > 5s, force initialization
                     if (!auction.currentPlayer) {
                         const loadingMs = now - auction.updatedAt;
                         if (loadingMs > 5000) {
@@ -380,9 +385,9 @@ const startWatchdog = (io) => {
                         continue;
                     }
 
-                    const timeExceeded = now.getTime() > (auction.auctionEndAt.getTime() + 2000);
-                    if (timeExceeded && auction.currentBidder) {
-                        console.log(`[WATCHDOG] Force-resolving expired round for room ${auction.roomId}`);
+                    const timeExceeded = now.getTime() > (auction.auctionEndAt.getTime() + 3000);
+                    if (timeExceeded) {
+                        console.log(`[WATCHDOG] Force-resolving expired round for room ${auction.roomId} (Expired for ${now.getTime() - auction.auctionEndAt.getTime()}ms)`);
                         await resolveAuctionRound(auction.roomId, io);
                         continue;
                     }
@@ -390,13 +395,13 @@ const startWatchdog = (io) => {
                     // 4. DEAD INTERVAL CHECK
                     const isLocalActive = !!activeTimers[auction.roomId];
                     const lastHeartbeatMs = now - (auction.lastWatchdogTick || auction.updatedAt);
-                    if (!isLocalActive || lastHeartbeatMs > 7000) {
-                        console.log(`[WATCHDOG] Restarting dead interval for room ${auction.roomId}`);
+                    if (!isLocalActive || lastHeartbeatMs > 10000) {
+                        console.log(`[WATCHDOG] Restarting dead interval for room ${auction.roomId} (LocalActive: ${isLocalActive}, LastPulse: ${lastHeartbeatMs}ms ago)`);
                         runTimer(auction.roomId, io);
                     }
                 }
 
-                // 5. FINAL SAFETY FALLBACK: Total deadlock break
+                // 5. GLOBAL DEADLOCK BREAK
                 const deadMs = now - (auction.lastEventAt || auction.updatedAt);
                 if (deadMs > 60000) {
                     console.log(`[WATCHDOG] Global deadlock break for room ${auction.roomId}`);
