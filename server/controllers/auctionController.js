@@ -43,11 +43,18 @@ const startAuction = async (roomId, io, isFirst = false) => {
 
         // 3. INITIALIZATION/REFILL DATA (if queue is empty)
         if (auction.auctionQueue.length === 0) {
-            // Find players that are available OR were previously unsold
-            const allPlayers = await Player.find({ status: { $in: ['available', 'unsold'] } });
+            // Find players that are STRICTLY 'available'
+            const allPlayers = await Player.find({ status: 'available' });
             if (allPlayers.length > 0) {
-                console.log(`[DEBUG] Initializing player queue for room ${roomId}`);
-                const shuffledIds = allPlayers.sort(() => Math.random() - 0.5).map(p => p._id);
+                console.log(`[DEBUG] Initializing available player queue for room ${roomId}`);
+
+                // Fisher-Yates Shuffle for true randomization
+                const shuffledIds = allPlayers.map(p => p._id);
+                for (let i = shuffledIds.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffledIds[i], shuffledIds[j]] = [shuffledIds[j], shuffledIds[i]];
+                }
+
                 auction = await Auction.findOneAndUpdate(
                     { roomId },
                     { $set: { auctionQueue: shuffledIds } },
@@ -71,10 +78,11 @@ const startAuction = async (roomId, io, isFirst = false) => {
             return;
         }
 
-        const nextPlayer = await Player.findById(nextPlayerId);
+        const nextPlayer = await Player.findOne({ _id: nextPlayerId, status: 'available' });
         if (!nextPlayer) {
-            console.log(`[DEBUG] Player ${nextPlayerId} not found, skipping.`);
+            console.log(`[DEBUG] Player ${nextPlayerId} not found or no longer available, skipping.`);
             await Auction.updateOne({ roomId }, { $pop: { auctionQueue: -1 } });
+            // Re-run startAuction to pick the next one in queue
             return startAuction(roomId, io);
         }
 
