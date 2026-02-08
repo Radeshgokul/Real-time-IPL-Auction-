@@ -197,7 +197,7 @@ const runTimer = (roomId, io) => {
             });
 
             // Trigger resolution if time is up
-            if (now >= auction.auctionEndAt.getTime()) {
+            if (remainingSecs <= 0 || now >= auction.auctionEndAt.getTime()) {
                 delete activeTimers[roomId];
                 console.log(`[DEBUG] Time expired for room ${roomId}. Resolving...`);
                 await resolveAuctionRound(roomId, io);
@@ -348,7 +348,7 @@ const endAuctionManually = async (roomId, io) => {
         const teams = await Team.find({ roomId }).populate('squad');
 
         if (activeTimers[roomId]) {
-            clearInterval(activeTimers[roomId]);
+            clearTimeout(activeTimers[roomId]);
             delete activeTimers[roomId];
         }
 
@@ -367,7 +367,7 @@ const resetAuction = async (roomId, io) => {
         const room = await Room.findOneAndUpdate({ roomId }, { $set: { status: 'waiting' } }, { new: true }).populate('users', 'username isGuest');
 
         if (activeTimers[roomId]) {
-            clearInterval(activeTimers[roomId]);
+            clearTimeout(activeTimers[roomId]);
             delete activeTimers[roomId];
         }
 
