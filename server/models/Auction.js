@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const AuctionSchema = new mongoose.Schema({
-    roomId: { type: String, required: true },
+    roomId: { type: String, required: true, index: true },
     seasonId: { type: mongoose.Schema.Types.ObjectId, ref: 'Season' },
     currentPlayer: { type: mongoose.Schema.Types.ObjectId, ref: 'Player' },
     status: { type: String, enum: ['waiting', 'running', 'completed', 'resolving'], default: 'waiting' },

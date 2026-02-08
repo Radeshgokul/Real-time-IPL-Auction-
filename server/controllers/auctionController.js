@@ -65,7 +65,18 @@ const startAuction = async (roomId, io, isFirst = false) => {
         // 5. ATOMIC PLAYER PICK: Shift the queue and set active player
         // We use $pop and $set to make it as atomic as possible
         const nextPlayerId = auction.auctionQueue[0];
+        if (!nextPlayerId) {
+            console.log(`[DEBUG] No player ID in queue for ${roomId}, returning to resolving.`);
+            await Auction.updateOne({ roomId }, { $set: { status: 'resolving' } });
+            return;
+        }
+
         const nextPlayer = await Player.findById(nextPlayerId);
+        if (!nextPlayer) {
+            console.log(`[DEBUG] Player ${nextPlayerId} not found, skipping.`);
+            await Auction.updateOne({ roomId }, { $pop: { auctionQueue: -1 } });
+            return startAuction(roomId, io);
+        }
 
         const countdownSeconds = 60;
         const endTime = new Date(Date.now() + countdownSeconds * 1000);
@@ -86,7 +97,10 @@ const startAuction = async (roomId, io, isFirst = false) => {
             { new: true }
         ).populate('currentPlayer');
 
-        if (!auction) return;
+        if (!auction || !auction.currentPlayer) {
+            console.log(`[DEBUG] Failed to set currentPlayer for ${roomId}`);
+            return;
+        }
 
         if (isFirst) {
             io.to(roomId).emit('auction:start', { firstPlayer: nextPlayer, auction });
@@ -151,17 +165,15 @@ const roomStates = {}; // In-memory cache for room-specific auction state (e.g. 
 
 const runTimer = (roomId, io) => {
     if (activeTimers[roomId]) {
-        clearInterval(activeTimers[roomId]);
+        clearTimeout(activeTimers[roomId]);
     }
 
-    console.log(`[DEBUG] Starting authoritative timer for room ${roomId}`);
+    console.log(`[DEBUG] Starting authoritative timer pulse for room ${roomId}`);
 
-    // Pulse once immediately to ensure clients are synced
     const pulseTimer = async () => {
         try {
             const auction = await Auction.findOne({ roomId });
             if (!auction || auction.status !== 'running') {
-                clearInterval(activeTimers[roomId]);
                 delete activeTimers[roomId];
                 return;
             }
@@ -178,15 +190,14 @@ const runTimer = (roomId, io) => {
 
             // Trigger resolution if time is up
             if (now >= auction.auctionEndAt.getTime()) {
-                clearInterval(activeTimers[roomId]);
                 delete activeTimers[roomId];
                 console.log(`[DEBUG] Time expired for room ${roomId}. Resolving...`);
                 await resolveAuctionRound(roomId, io);
                 return;
             }
 
-            // Pulse DB heartbeat every 5 seconds or if it just started
-            if (!auction.lastWatchdogTick || now - auction.lastWatchdogTick.getTime() > 5000) {
+            // Pulse DB heartbeat every 5 seconds
+            if (!auction.lastWatchdogTick || (now - auction.lastWatchdogTick.getTime() > 5000)) {
                 await Auction.updateOne({ roomId }, {
                     $set: {
                         timer: remainingSecs,
@@ -194,12 +205,16 @@ const runTimer = (roomId, io) => {
                     }
                 });
             }
+
+            // Schedule next pulse
+            activeTimers[roomId] = setTimeout(pulseTimer, 1000);
         } catch (err) {
             console.error('[ERROR] Timer Pulsing Error:', err);
+            // On error, try to reschedule to keep the timer alive
+            activeTimers[roomId] = setTimeout(pulseTimer, 2000);
         }
     };
 
-    activeTimers[roomId] = setInterval(pulseTimer, 1000);
     pulseTimer(); // Immediate first pulse
 };
 
@@ -249,7 +264,12 @@ const resolveAuctionRound = async (roomId, io) => {
                     { new: true }
                 ).populate('squad').populate('userId', 'username');
 
-                io.to(roomId).emit('auction:sold', { player, team, price: auction.currentBid });
+                if (team) {
+                    io.to(roomId).emit('auction:sold', { player, team, price: auction.currentBid });
+                } else {
+                    console.error(`[ERROR] Team ${auction.currentBidder} not found in resolveAuctionRound`);
+                    io.to(roomId).emit('auction:sold', { player, price: auction.currentBid });
+                }
             }
         } else {
             // Unsold (via skip)

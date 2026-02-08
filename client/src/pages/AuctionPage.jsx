@@ -20,7 +20,9 @@ const AuctionTimer = memo(({ auctionEndAt, status }) => {
             setLocalTimer(calculateRemaining());
         }, 500); // Pulse every 500ms is enough for UI
 
-        return () => clearInterval(ticker);
+        return () => {
+            if (ticker) clearInterval(ticker);
+        };
     }, [auctionEndAt, status]);
 
     return (
@@ -205,6 +207,7 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
 
     useEffect(() => {
         const handleNewPlayer = (data) => {
+            if (!data?.player || !data?.auction) return;
             setAuction(data.auction);
             setOverlay(null);
             addNotification(`Next Player: ${data.player.name}`);
@@ -231,12 +234,16 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
         };
 
         const handleSold = (data) => {
+            if (!data?.player) return;
             setOverlay({ type: 'sold', player: data.player, team: data.team, price: data.price });
-            addNotification(`SOLD! ${data.player.name} to ${data.team.name} for ₹${(data.price / 10000000).toFixed(2)} Cr`);
-            setAuctionTeams(prev => prev.map(t => t._id === data.team._id ? data.team : t));
+            addNotification(`SOLD! ${data.player.name} ${data.team ? `to ${data.team.name}` : ''} for ₹${(data.price / 10000000).toFixed(2)} Cr`);
+            if (data.team) {
+                setAuctionTeams(prev => prev.map(t => t._id === data.team._id ? data.team : t));
+            }
         };
 
         const handleUnsold = (data) => {
+            if (!data?.player) return;
             setOverlay({ type: 'unsold', player: data.player });
             addNotification(`UNSOLD: ${data.player.name}`);
         };
