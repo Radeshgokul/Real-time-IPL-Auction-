@@ -53,13 +53,23 @@ function App() {
             }) : prev);
         };
 
+        const processingRef = React.useRef({ sold: false, end: false });
+
         const handleAuctionSold = (data) => {
+            if (processingRef.current.sold) return;
+            processingRef.current.sold = true;
+            setTimeout(() => { processingRef.current.sold = false; }, 2000);
+
             if (data.team) {
                 setTeams(prev => prev.map(t => t._id === data.team._id ? data.team : t));
             }
         };
 
         const handleAuctionEnd = (data) => {
+            if (processingRef.current.end) return;
+            processingRef.current.end = true;
+            setTimeout(() => { processingRef.current.end = false; }, 2000);
+
             if (data.teams) setTeams(data.teams);
             setAuction(prev => ({ ...prev, ...(data.auction || {}), status: 'completed' }));
         };

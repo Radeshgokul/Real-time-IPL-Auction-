@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const AuctionTimer = memo(({ auctionEndAt, status }) => {
     const [localTimer, setLocalTimer] = useState(0);
+    const tickerRef = useRef(null);
 
     useEffect(() => {
         const calculateRemaining = () => {
@@ -15,14 +16,23 @@ const AuctionTimer = memo(({ auctionEndAt, status }) => {
             return Math.max(0, Math.ceil((end - now) / 1000));
         };
 
-        setLocalTimer(calculateRemaining());
-        const ticker = setInterval(() => {
-            setLocalTimer(calculateRemaining());
-        }, 500); // Pulse every 500ms is enough for UI
-
-        return () => {
-            if (ticker) clearInterval(ticker);
+        const cleanup = () => {
+            if (tickerRef.current) {
+                clearInterval(tickerRef.current);
+                tickerRef.current = null;
+            }
         };
+
+        cleanup();
+        setLocalTimer(calculateRemaining());
+
+        tickerRef.current = setInterval(() => {
+            const rem = calculateRemaining();
+            setLocalTimer(rem);
+            if (rem <= 0) cleanup();
+        }, 500);
+
+        return cleanup;
     }, [auctionEndAt, status]);
 
     return (
