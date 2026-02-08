@@ -129,7 +129,7 @@ const restartCurrentPlayer = async (roomId, io) => {
 
         // 1. Clear any active interval immediately to prevent collisions
         if (activeTimers[roomId]) {
-            clearInterval(activeTimers[roomId]);
+            clearTimeout(activeTimers[roomId]);
             delete activeTimers[roomId];
         }
 
@@ -327,7 +327,7 @@ const handleSkipVote = async (roomId, userId, io) => {
 
         if (auction.skipVotes.length >= threshold) {
             if (activeTimers[roomId]) {
-                clearInterval(activeTimers[roomId]);
+                clearTimeout(activeTimers[roomId]);
                 delete activeTimers[roomId];
             }
             auction.currentBidder = null;
@@ -448,7 +448,7 @@ const emergencyRestartPlayer = async (roomId, io) => {
 
         // 1. Clear any active interval immediately
         if (activeTimers[roomId]) {
-            clearInterval(activeTimers[roomId]);
+            clearTimeout(activeTimers[roomId]);
             delete activeTimers[roomId];
         }
 

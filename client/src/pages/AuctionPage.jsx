@@ -193,40 +193,22 @@ const FranchiseStatus = memo(({ teams, myTeamId, onSelectTeam, selectedTeamId })
 
 // --- MAIN PAGE COMPONENT ---
 
-const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
-    const [auction, setAuction] = useState(auctionData);
-    const [auctionTeams, setAuctionTeams] = useState(teams);
+const AuctionPage = ({ roomId, userId, teams: auctionTeams, auctionData: auction, room }) => {
     const [notifications, setNotifications] = useState([]);
     const [overlay, setOverlay] = useState(null);
     const [selectedTeam, setSelectedTeam] = useState(null);
 
-    // Initial sync
-    useEffect(() => {
-        if (auctionData) setAuction(auctionData);
-    }, [auctionData]);
 
     useEffect(() => {
         const handleNewPlayer = (data) => {
-            if (!data?.player || !data?.auction) return;
-            setAuction(data.auction);
+            if (!data?.player) return;
             setOverlay(null);
             addNotification(`Next Player: ${data.player.name}`);
         };
 
         const handleAuctionStart = (data) => {
-            setAuction(data.auction);
             setOverlay(null);
             addNotification(`Auction Started! First Player: ${data.firstPlayer.name}`);
-        };
-
-        const handleAuctionUpdate = (data) => setAuction(data.auction);
-
-        const handleTimer = (data) => {
-            setAuction(prev => ({
-                ...prev,
-                timer: data.timer,
-                auctionEndAt: data.auctionEndAt || prev.auctionEndAt
-            }));
         };
 
         const handleBidUpdate = (data) => {
@@ -237,9 +219,6 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
             if (!data?.player) return;
             setOverlay({ type: 'sold', player: data.player, team: data.team, price: data.price });
             addNotification(`SOLD! ${data.player.name} ${data.team ? `to ${data.team.name}` : ''} for ₹${(data.price / 10000000).toFixed(2)} Cr`);
-            if (data.team) {
-                setAuctionTeams(prev => prev.map(t => t._id === data.team._id ? data.team : t));
-            }
         };
 
         const handleUnsold = (data) => {
@@ -248,38 +227,25 @@ const AuctionPage = ({ roomId, userId, teams, auctionData, room }) => {
             addNotification(`UNSOLD: ${data.player.name}`);
         };
 
-        const handleEnd = (data) => {
-            if (data.teams) setAuctionTeams(data.teams);
-            setAuction(prev => ({ ...prev, ...(data.auction || {}), status: 'completed' }));
+        const handleEnd = () => {
             setOverlay(null);
             addNotification("Auction Ended!");
         };
 
-        const handleRoomSync = (data) => {
-            if (data.auction) setAuction(data.auction);
-            if (data.teams) setAuctionTeams(data.teams);
-        };
-
         socket.on('auction:newPlayer', handleNewPlayer);
         socket.on('auction:start', handleAuctionStart);
-        socket.on('auction:update', handleAuctionUpdate);
-        socket.on('auction:timer', handleTimer);
         socket.on('auction:bidUpdate', handleBidUpdate);
         socket.on('auction:sold', handleSold);
         socket.on('auction:unsold', handleUnsold);
         socket.on('auction:end', handleEnd);
-        socket.on('room:sync', handleRoomSync);
 
         return () => {
             socket.off('auction:newPlayer', handleNewPlayer);
             socket.off('auction:start', handleAuctionStart);
-            socket.off('auction:update', handleAuctionUpdate);
-            socket.off('auction:timer', handleTimer);
             socket.off('auction:bidUpdate', handleBidUpdate);
             socket.off('auction:sold', handleSold);
             socket.off('auction:unsold', handleUnsold);
             socket.off('auction:end', handleEnd);
-            socket.off('room:sync', handleRoomSync);
         };
     }, []);
 

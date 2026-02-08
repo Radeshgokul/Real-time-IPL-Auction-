@@ -45,14 +45,34 @@ function App() {
         const handlePointsUpdate = (data) => setPointsTable(data.pointsTable);
         const handleAuctionState = (data) => setAuction(data.auction);
 
+        const handleAuctionTimer = (data) => {
+            setAuction(prev => prev ? ({
+                ...prev,
+                timer: data.timer,
+                auctionEndAt: data.auctionEndAt || prev.auctionEndAt
+            }) : prev);
+        };
+
+        const handleAuctionSold = (data) => {
+            if (data.team) {
+                setTeams(prev => prev.map(t => t._id === data.team._id ? data.team : t));
+            }
+        };
+
+        const handleAuctionEnd = (data) => {
+            if (data.teams) setTeams(data.teams);
+            setAuction(prev => ({ ...prev, ...(data.auction || {}), status: 'completed' }));
+        };
+
         socket.on('room:sync', handleRoomSync);
         socket.on('match:start', handleMatchStart);
         socket.on('points:update', handlePointsUpdate);
-
-        // Global Auction Listeners to prevent race conditions
         socket.on('auction:start', handleAuctionState);
         socket.on('auction:newPlayer', handleAuctionState);
         socket.on('auction:update', handleAuctionState);
+        socket.on('auction:timer', handleAuctionTimer);
+        socket.on('auction:sold', handleAuctionSold);
+        socket.on('auction:end', handleAuctionEnd);
 
         return () => {
             socket.off('room:sync', handleRoomSync);
@@ -61,6 +81,9 @@ function App() {
             socket.off('auction:start', handleAuctionState);
             socket.off('auction:newPlayer', handleAuctionState);
             socket.off('auction:update', handleAuctionState);
+            socket.off('auction:timer', handleAuctionTimer);
+            socket.off('auction:sold', handleAuctionSold);
+            socket.off('auction:end', handleAuctionEnd);
         };
     }, []);
 
@@ -218,7 +241,15 @@ function App() {
         );
     }
 
-    if (room.status === 'auction') return <AuctionPage roomId={room.roomId} userId={user.id} teams={teams} auctionData={auction} room={room} />;
+    if (room.status === 'auction') return (
+        <AuctionPage
+            roomId={room.roomId}
+            userId={user.id}
+            teams={teams}
+            auctionData={auction}
+            room={room}
+        />
+    );
 
     if (room.status === 'playing_xi') {
         const myTeam = teams.find(t => {

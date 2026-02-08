@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import socket from '../utils/socket';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const MatchCenter = ({ roomId, userId, teams, matchData, playingXIs }) => {
     const [match, setMatch] = useState(matchData);
@@ -145,4 +145,3 @@ const MatchCenter = ({ roomId, userId, teams, matchData, playingXIs }) => {
 
 export default MatchCenter;
 
-import { AnimatePresence } from 'framer-motion';
