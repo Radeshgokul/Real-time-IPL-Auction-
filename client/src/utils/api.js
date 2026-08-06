@@ -1,9 +1,9 @@
 import axios from 'axios';
 
-const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-const API_URL = isProduction
-    ? 'https://real-time-ipl-auction.onrender.com/api'
-    : `http://${window.location.hostname}:5000/api`;
+const API_URL = import.meta.env.VITE_API_URL || 
+    (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+        ? 'https://real-time-ipl-auction.onrender.com/api'
+        : `http://${window.location.hostname}:5000/api`);
 
 const api = axios.create({
     baseURL: API_URL,
