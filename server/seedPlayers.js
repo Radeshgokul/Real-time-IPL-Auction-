@@ -162,14 +162,30 @@ Dewald Brevis,Batter,Matthew Breetzke,Batter
 
         await Player.insertMany(players);
         console.log(`Successfully seeded ${players.length} players!`);
-        mongoose.connection.close();
-        process.exit(0);
-
+        return players.length;
     } catch (err) {
         console.error('Seeding error:', err);
-        mongoose.connection.close();
-        process.exit(1);
+        throw err;
     }
 };
 
-seedPlayers();
+if (require.main === module) {
+    mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ipl-auction-game')
+        .then(async () => {
+            console.log('Connected to MongoDB');
+            await Player.deleteMany({});
+            await Auction.deleteMany({});
+            await Team.deleteMany({});
+            await Room.deleteMany({});
+            console.log('Cleared existing data (Players, Auctions, Teams, Rooms)');
+            await seedPlayers();
+            mongoose.connection.close();
+            process.exit(0);
+        })
+        .catch(err => {
+            console.error('MongoDB connection error:', err);
+            process.exit(1);
+        });
+}
+
+module.exports = { seedPlayers };
